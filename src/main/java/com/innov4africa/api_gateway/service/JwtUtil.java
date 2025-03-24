@@ -3,16 +3,20 @@ package com.innov4africa.api_gateway.service;
 import io.jsonwebtoken.Claims;
 import io.jsonwebtoken.Jwts;
 import io.jsonwebtoken.SignatureAlgorithm;
+import io.jsonwebtoken.security.Keys;
+
 import org.springframework.stereotype.Component;
 
 import java.util.Date;
 import java.util.function.Function;
 
+import javax.crypto.SecretKey;
+
 @Component
 public class JwtUtil {
 
     // Clé secrète pour signer le JWT (à remplacer par une clé sécurisée en production)
-    private final String SECRET_KEY = "votre_clé_secrète_sécurisée";
+    private final SecretKey SECRET_KEY = Keys.secretKeyFor(SignatureAlgorithm.HS256);
 
     // Durée de validité du token (10 heures ici)
     private final long JWT_TOKEN_VALIDITY = 10 * 60 * 60 * 1000;

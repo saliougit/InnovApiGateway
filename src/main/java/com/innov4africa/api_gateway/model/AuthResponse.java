@@ -4,7 +4,7 @@ import java.util.List;
 
 
 public class AuthResponse{
-     private String status;
+    private String status;
     private String message;
     private String token;
     private List<ServiceStatus> serviceStatuses;

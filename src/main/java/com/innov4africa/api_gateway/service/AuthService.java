@@ -2,6 +2,7 @@ package com.innov4africa.api_gateway.service;
 
 import com.innov4africa.api_gateway.model.AuthRequest;
 import com.innov4africa.api_gateway.model.AuthResponse;
+import com.innov4africa.api_gateway.model.AuthResult;
 import com.innov4africa.api_gateway.model.ServiceStatus;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
@@ -16,34 +17,30 @@ public class AuthService {
     private IPayService ipayService;
 
     @Autowired
-    private IBankingService ibankingService;
-
-    @Autowired
     private JwtUtil jwtUtil;
 
     public Mono<AuthResponse> authenticate(AuthRequest request) {
         String email = request.getEmail();
         String password = request.getPassword();
 
-        // Authentification parallèle avec i-pay et i-banking
-        Mono<Boolean> ipayAuth = ipayService.authenticate(email, password);
-        Mono<Boolean> ibankingAuth = Mono.just(ibankingService.authenticate(email, password));
-
-        return Mono.zip(ipayAuth, ibankingAuth).map(results -> {
-            boolean ipaySuccess = results.getT1();
-            boolean ibankingSuccess = results.getT2();
-
-            // Liste des services disponibles et indisponibles
-            List<ServiceStatus> serviceStatuses = List.of(
-                    new ServiceStatus("i-pay", ipaySuccess, ipaySuccess ? "Service disponible" : "Service indisponible"),
-                    new ServiceStatus("i-banking", ibankingSuccess, ibankingSuccess ? "Service disponible" : "Service indisponible")
-            );
-
-            if (ipaySuccess || ibankingSuccess) {
+        // Authentification avec i-pay
+        return ipayService.authenticate(email, password).flatMap(authResult -> {
+            if (authResult.isSuccess()) {
+                // Générer un token JWT
                 String jwtToken = jwtUtil.generateToken(email);
-                return new AuthResponse("success", "Authentification réussie", jwtToken, serviceStatuses);
+                return Mono.just(new AuthResponse(
+                        "success",
+                        authResult.getMessage(), // Message de succès
+                        jwtToken,
+                        List.of(new ServiceStatus("i-pay", true, "Service disponible"))
+                ));
             } else {
-                return new AuthResponse("error", "Aucun service disponible", null, serviceStatuses);
+                return Mono.just(new AuthResponse(
+                        "error",
+                        authResult.getMessage(), // Message d'erreur
+                        null,
+                        List.of(new ServiceStatus("i-pay", false, "Service indisponible"))
+                ));
             }
         });
     }
@@ -53,13 +50,12 @@ public class AuthService {
 
 // package com.innov4africa.api_gateway.service;
 
-
-// import org.springframework.beans.factory.annotation.Autowired;
-// import org.springframework.stereotype.Service;
-// import reactor.core.publisher.Mono;
 // import com.innov4africa.api_gateway.model.AuthRequest;
 // import com.innov4africa.api_gateway.model.AuthResponse;
 // import com.innov4africa.api_gateway.model.ServiceStatus;
+// import org.springframework.beans.factory.annotation.Autowired;
+// import org.springframework.stereotype.Service;
+// import reactor.core.publisher.Mono;
 
 // import java.util.List;
 
@@ -70,34 +66,30 @@ public class AuthService {
 //     private IPayService ipayService;
 
 //     @Autowired
-//     private IBankingService ibankingService;
-
-//     @Autowired
 //     private JwtUtil jwtUtil;
 
 //     public Mono<AuthResponse> authenticate(AuthRequest request) {
 //         String email = request.getEmail();
 //         String password = request.getPassword();
 
-//         // Authentification parallèle avec i-pay et i-banking
-//         Mono<Boolean> ipayAuth = ipayService.authenticate(email, password);
-//         Mono<Boolean> ibankingAuth = Mono.just(ibankingService.authenticate(email, password));
-
-//         return Mono.zip(ipayAuth, ibankingAuth).map(results -> {
-//             boolean ipaySuccess = results.getT1();
-//             boolean ibankingSuccess = results.getT2();
-
-//             // Liste des services disponibles et indisponibles
-//             List<ServiceStatus> serviceStatuses = List.of(
-//                     new ServiceStatus("i-pay", ipaySuccess, ipaySuccess ? "Service disponible" : "Service indisponible"),
-//                     new ServiceStatus("i-banking", ibankingSuccess, ibankingSuccess ? "Service disponible" : "Service indisponible")
-//             );
-
-//             if (ipaySuccess || ibankingSuccess) {
+//         // Authentification avec i-pay
+//         return ipayService.authenticate(email, password).flatMap(ipaySuccess -> {
+//             if (ipaySuccess) {
+//                 // Générer un token JWT
 //                 String jwtToken = jwtUtil.generateToken(email);
-//                 return new AuthResponse("success", "Authentification réussie", jwtToken, serviceStatuses);
+//                 return Mono.just(new AuthResponse(
+//                         "success",
+//                         "Authentification réussie",
+//                         jwtToken,
+//                         List.of(new ServiceStatus("i-pay", true, "Service disponible"))
+//                 ));
 //             } else {
-//                 return new AuthResponse("error", "Aucun service disponible", null, serviceStatuses);
+//                 return Mono.just(new AuthResponse(
+//                         "error",
+//                         "Authentification i-pay échouée",
+//                         null,
+//                         List.of(new ServiceStatus("i-pay", false, "Service indisponible"))
+//                 ));
 //             }
 //         });
 //     }

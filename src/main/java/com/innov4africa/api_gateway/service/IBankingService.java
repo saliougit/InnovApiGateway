@@ -6,8 +6,12 @@ import org.springframework.stereotype.Service;
 @Service
 public class IBankingService {
 
+    // public boolean authenticate(String email, String password) {
+    //     // Placeholder pour l'authentification i-banking
+    //     return false;
+    // }
     public boolean authenticate(String email, String password) {
-        // Placeholder pour l'authentification i-banking
-        return false;
+        // Simuler une réponse réussie pour tester
+        return true;
     }
 }
