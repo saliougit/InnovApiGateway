@@ -338,7 +338,6 @@ import javax.xml.transform.stream.StreamResult;
 import javax.xml.transform.stream.StreamSource;
 import java.io.StringReader;
 import java.io.StringWriter;
-import org.springframework.ws.soap.SoapMessage;
 
 @Service
 public class IPayService {
@@ -392,9 +391,7 @@ public class IPayService {
         webServiceTemplate.sendSourceAndReceiveToResult(
                 "https://ibusinesscompanies.com:8443/cash-ws/CashWalletServiceWS",
                 new StreamSource(new StringReader(soapRequest)),
-                request -> {
-                    ((SoapMessage) request).setSoapAction("http://runtime.services.cash.innov.sn/login");
-                },
+                new SoapActionCallback("http://runtime.services.cash.innov.sn/login"),
                 result
         );
 
@@ -406,18 +403,15 @@ public class IPayService {
             return new AuthResult(false, "Réponse SOAP vide");
         }
         
-        // Vérifier si la réponse contient "<error>0</error>" (succès)
         if (soapResponse.contains("<error>0</error>")) {
             return new AuthResult(true, "Authentification réussie");
         } else {
-            // Extraire le message d'erreur de la réponse SOAP
             String errorMessage = extractErrorMessage(soapResponse);
             return new AuthResult(false, errorMessage);
         }
     }
 
     private String extractErrorMessage(String soapResponse) {
-        // Exemple simplifié pour extraire le message d'erreur
         int startIndex = soapResponse.indexOf("<message>");
         int endIndex = soapResponse.indexOf("</message>");
         
