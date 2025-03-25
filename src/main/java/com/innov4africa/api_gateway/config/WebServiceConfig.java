@@ -1,23 +1,22 @@
 package com.innov4africa.api_gateway.config;
 
-import org.apache.hc.client5.http.impl.classic.CloseableHttpClient;
-import org.apache.hc.client5.http.impl.classic.HttpClients;
-import org.apache.hc.client5.http.impl.io.PoolingHttpClientConnectionManager;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.ws.client.core.WebServiceTemplate;
 import org.springframework.ws.soap.SoapVersion;
 import org.springframework.ws.soap.saaj.SaajSoapMessageFactory;
-import org.springframework.ws.transport.http.HttpComponentsMessageSender;
 import org.springframework.oxm.jaxb.Jaxb2Marshaller;
-import org.springframework.ws.WebServiceMessage;
-import org.springframework.ws.client.core.WebServiceMessageCallback;
+import org.springframework.ws.client.support.interceptor.ClientInterceptor;
+import org.springframework.ws.context.MessageContext;
 import org.springframework.ws.soap.SoapMessage;
+import org.springframework.ws.client.support.interceptor.ClientInterceptorAdapter;
+import org.springframework.ws.transport.http.HttpUrlConnectionMessageSender;
 
 import jakarta.xml.soap.MessageFactory;
 import jakarta.xml.soap.SOAPConstants;
 import jakarta.xml.soap.SOAPException;
 
+import java.time.Duration;
 import java.util.HashMap;
 import java.util.Map;
 
@@ -33,22 +32,29 @@ public class WebServiceConfig {
         return saajSoapMessageFactory;
     }
 
-    @Bean   
-    public CloseableHttpClient httpClient() {
-        PoolingHttpClientConnectionManager cm = new PoolingHttpClientConnectionManager();
-        cm.setMaxTotal(100);
-        cm.setDefaultMaxPerRoute(20);
-        return HttpClients.custom()
-                .setConnectionManager(cm)
-                .build();
+    @Bean
+    public HttpUrlConnectionMessageSender messageSender() {
+        HttpUrlConnectionMessageSender sender = new HttpUrlConnectionMessageSender();
+        sender.setConnectionTimeout(Duration.ofSeconds(30));
+        sender.setReadTimeout(Duration.ofSeconds(30));
+        return sender;
     }
 
     @Bean
-    public HttpComponentsMessageSender messageSender(CloseableHttpClient httpClient) {
-        HttpComponentsMessageSender messageSender = new HttpComponentsMessageSender(httpClient);
-        messageSender.setConnectionTimeout(30000);
-        messageSender.setReadTimeout(30000);
-        return messageSender;
+    public ClientInterceptor soapHeaderInterceptor() {
+        return new ClientInterceptorAdapter() {
+            @Override
+            public boolean handleRequest(MessageContext messageContext) {
+                try {
+                    SoapMessage soapMessage = (SoapMessage) messageContext.getRequest();
+                    soapMessage.getSoapHeader().addNamespaceDeclaration("soap", "http://schemas.xmlsoap.org/soap/envelope/");
+                    soapMessage.getSoapHeader().addNamespaceDeclaration("run", "http://runtime.services.cash.innov.sn/");
+                    return true;
+                } catch (Exception e) {
+                    return false;
+                }
+            }
+        };
     }
 
     @Bean
@@ -75,25 +81,18 @@ public class WebServiceConfig {
     }
 
     @Bean
-    public WebServiceTemplate webServiceTemplate(SaajSoapMessageFactory messageFactory, 
-                                               HttpComponentsMessageSender messageSender,
-                                               Jaxb2Marshaller marshaller) {
+    public WebServiceTemplate webServiceTemplate(
+        SaajSoapMessageFactory messageFactory, 
+        HttpUrlConnectionMessageSender messageSender,
+        Jaxb2Marshaller marshaller,
+        ClientInterceptor soapHeaderInterceptor) {
+        
         WebServiceTemplate webServiceTemplate = new WebServiceTemplate(messageFactory);
         webServiceTemplate.setMessageSender(messageSender);
         webServiceTemplate.setMarshaller(marshaller);
         webServiceTemplate.setUnmarshaller(marshaller);
         webServiceTemplate.setDefaultUri("https://ibusinesscompanies.com:8443/cash-ws/CashWalletServiceWS");
-        
-        WebServiceMessageCallback soapHeaderCallback = new WebServiceMessageCallback() {
-            @Override
-            public void doWithMessage(WebServiceMessage message) {
-                SoapMessage soapMessage = (SoapMessage) message;
-                soapMessage.getSoapHeader().addNamespaceDeclaration("soap", "http://schemas.xmlsoap.org/soap/envelope/");
-                soapMessage.getSoapHeader().addNamespaceDeclaration("run", "http://runtime.services.cash.innov.sn/");
-            }
-        };
-        
-        webServiceTemplate.setDefaultCallback(soapHeaderCallback);
+        webServiceTemplate.setInterceptors(new ClientInterceptor[]{soapHeaderInterceptor});
         
         return webServiceTemplate;
     }
