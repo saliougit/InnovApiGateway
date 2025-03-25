@@ -1,8 +1,28 @@
+// package com.innov4africa.api_gateway.config;
+
+// import org.springframework.context.annotation.Bean;
+// import org.springframework.context.annotation.Configuration;
+// import org.springframework.ws.client.core.WebServiceTemplate;
+
+// @Configuration
+// public class WebServiceConfig {
+
+//     @Bean
+//     public WebServiceTemplate webServiceTemplate() {
+//         WebServiceTemplate webServiceTemplate = new WebServiceTemplate();
+//         // Pas besoin de marshaller/unmarshaller pour des chaînes XML brutes
+//         return webServiceTemplate;
+//     }
+// }
+
+
 package com.innov4africa.api_gateway.config;
 
+import org.apache.http.impl.client.HttpClients;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.ws.client.core.WebServiceTemplate;
+import org.springframework.ws.transport.http.HttpComponentsMessageSender;
 
 @Configuration
 public class WebServiceConfig {
@@ -10,11 +30,19 @@ public class WebServiceConfig {
     @Bean
     public WebServiceTemplate webServiceTemplate() {
         WebServiceTemplate webServiceTemplate = new WebServiceTemplate();
-        // Pas besoin de marshaller/unmarshaller pour des chaînes XML brutes
+        
+        // Configurer le message sender avec HttpClient
+        HttpComponentsMessageSender messageSender = new HttpComponentsMessageSender();
+        messageSender.setHttpClient(HttpClients.createDefault());
+        webServiceTemplate.setMessageSender(messageSender);
+        
+        // Configurer les timeouts
+        messageSender.setConnectionTimeout(5000); // 5 secondes
+        messageSender.setReadTimeout(10000); // 10 secondes
+        
         return webServiceTemplate;
     }
 }
-
 
 // package com.innov4africa.api_gateway.config;
 
