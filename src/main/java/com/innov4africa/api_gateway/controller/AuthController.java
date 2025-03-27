@@ -60,23 +60,35 @@ public class AuthController {
     @PostMapping("/login")
     public Mono<ResponseEntity<AuthResponse>> login(@RequestBody AuthRequest request) {
         return authService.authenticate(request)
-                .map(response -> {
-                    if ("success".equals(response.getStatus())) {
-                        return ResponseEntity.ok(response);
-                    } else {
-                        return ResponseEntity.status(401).body(response);
-                    }
-                })
-                .onErrorResume(e -> Mono.just(
-                        ResponseEntity.status(500)
-                                .body(new AuthResponse(
-                                        "error",
-                                        "Erreur interne du serveur: " + e.getMessage(),
-                                        null,
-                                        List.of(new ServiceStatus("i-pay", false, "Service indisponible"))
-                                ))
-                ));
+            .map(response -> {
+                if ("success".equals(response.getStatus())) {
+                    return ResponseEntity.ok(response);
+                } else {
+                    return ResponseEntity.status(401).body(response);
+                }
+            });
     }
+
+    // @PostMapping("/login")
+    // public Mono<ResponseEntity<AuthResponse>> login(@RequestBody AuthRequest request) {
+    //     return authService.authenticate(request)
+    //             .map(response -> {
+    //                 if ("success".equals(response.getStatus())) {
+    //                     return ResponseEntity.ok(response);
+    //                 } else {
+    //                     return ResponseEntity.status(401).body(response);
+    //                 }
+    //             })
+    //             .onErrorResume(e -> Mono.just(
+    //                     ResponseEntity.status(500)
+    //                             .body(new AuthResponse(
+    //                                     "error",
+    //                                     "Erreur interne du serveur: " + e.getMessage(),
+    //                                     null,
+    //                                     List.of(new ServiceStatus("i-pay", false, "Service indisponible"))
+    //                             ))
+    //             ));
+    // }
 }
 
 // package com.innov4africa.api_gateway.controller;

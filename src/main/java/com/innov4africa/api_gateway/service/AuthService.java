@@ -22,28 +22,61 @@ public class AuthService {
     public Mono<AuthResponse> authenticate(AuthRequest request) {
         String email = request.getEmail();
         String password = request.getPassword();
-
-        // Authentification avec i-pay
-        return ipayService.authenticate(email, password).flatMap(authResult -> {
-            if (authResult.isSuccess()) {
-                // Générer un token JWT
-                String jwtToken = jwtUtil.generateToken(email);
-                return Mono.just(new AuthResponse(
+    
+        return ipayService.authenticate(email, password)
+            .map(authResult -> {
+                if (authResult.isSuccess()) {
+                    String jwtToken = jwtUtil.generateToken(email);
+                    return new AuthResponse(
                         "success",
-                        authResult.getMessage(), // Message de succès
+                        authResult.getMessage(),
                         jwtToken,
                         List.of(new ServiceStatus("i-pay", true, "Service disponible"))
-                ));
-            } else {
-                return Mono.just(new AuthResponse(
+                    );
+                } else {
+                    return new AuthResponse(
                         "error",
-                        authResult.getMessage(), // Message d'erreur
+                        authResult.getMessage(),
                         null,
-                        List.of(new ServiceStatus("i-pay", false, "Service indisponible"))
-                ));
-            }
-        });
+                        List.of(new ServiceStatus("i-pay", false, authResult.getMessage()))
+                    );
+                }
+            })
+            .onErrorResume(e -> Mono.just(
+                new AuthResponse(
+                    "error",
+                    "Erreur technique: " + e.getMessage(),
+                    null,
+                    List.of(new ServiceStatus("i-pay", false, "Erreur technique"))
+                )
+            ));
     }
+
+    // public Mono<AuthResponse> authenticate(AuthRequest request) {
+    //     String email = request.getEmail();
+    //     String password = request.getPassword();
+
+    //     // Authentification avec i-pay
+    //     return ipayService.authenticate(email, password).flatMap(authResult -> {
+    //         if (authResult.isSuccess()) {
+    //             // Générer un token JWT
+    //             String jwtToken = jwtUtil.generateToken(email);
+    //             return Mono.just(new AuthResponse(
+    //                     "success",
+    //                     authResult.getMessage(), // Message de succès
+    //                     jwtToken,
+    //                     List.of(new ServiceStatus("i-pay", true, "Service disponible"))
+    //             ));
+    //         } else {
+    //             return Mono.just(new AuthResponse(
+    //                     "error",
+    //                     authResult.getMessage(), // Message d'erreur
+    //                     null,
+    //                     List.of(new ServiceStatus("i-pay", false, "Service indisponible"))
+    //             ));
+    //         }
+    //     });
+    // }
 }
 
 // package com.innov4africa.api_gateway.service;

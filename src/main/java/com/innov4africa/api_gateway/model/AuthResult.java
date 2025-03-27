@@ -52,6 +52,8 @@ public class AuthResult {
     private boolean success;
     private String message;
     private String token;
+    private String nom;
+    private String prenom;
 
     // Constructeur pour le cas sans token
     public AuthResult(boolean success, String message) {
@@ -66,7 +68,16 @@ public class AuthResult {
         this.token = token;
     }
 
-    // Getters
+    // Nouveau constructeur avec tous les champs
+    public AuthResult(boolean success, String message, String token, String nom, String prenom) {
+        this.success = success;
+        this.message = message;
+        this.token = token;
+        this.nom = nom;
+        this.prenom = prenom;
+    }
+
+    // Getters et Setters pour tous les champs
     public boolean isSuccess() {
         return success;
     }
@@ -79,7 +90,14 @@ public class AuthResult {
         return token;
     }
 
-    // Setters
+    public String getNom() {
+        return nom;
+    }
+
+    public String getPrenom() {
+        return prenom;
+    }
+
     public void setSuccess(boolean success) {
         this.success = success;
     }
@@ -90,5 +108,13 @@ public class AuthResult {
 
     public void setToken(String token) {
         this.token = token;
+    }
+
+    public void setNom(String nom) {
+        this.nom = nom;
+    }
+
+    public void setPrenom(String prenom) {
+        this.prenom = prenom;
     }
 }
