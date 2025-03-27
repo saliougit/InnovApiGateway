@@ -1,3 +1,41 @@
+# server:
+#   port: 8080
+
+# spring:
+#   main:
+#     allow-bean-definition-overriding: true
+#     web-application-type: reactive
+#   application:
+#     name: api-gateway
+#   cloud:
+#     gateway:
+#       routes:
+#         - id: ipay-service
+#           uri: http://localhost:8081
+#           predicates:
+#             - Path=/ipay/**
+#         - id: ibanking-service
+#           uri: http://localhost:8082
+#           predicates:
+#             - Path=/ibanking/**
+
+#   data:
+#     redis:
+#       host: localhost
+#       port: 6379
+
+# jwt:
+#   secret: yourSecretKeyHereMustBeVeryLongAndSecure
+#   expiration: 86400000  # 24 hours in milliseconds
+
+# logging:
+#   level:
+#     org.springframework.cloud.gateway: DEBUG
+#     org.springframework.security: DEBUG
+
+
+# ------------
+
 server:
   port: 8080
 
@@ -32,6 +70,13 @@ logging:
   level:
     org.springframework.cloud.gateway: DEBUG
     org.springframework.security: DEBUG
+
+
+
+
+
+
+# ---------------
 
 
 # server:
