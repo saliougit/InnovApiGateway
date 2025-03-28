@@ -249,6 +249,63 @@ public class IPayService {
         }).subscribeOn(Schedulers.boundedElastic());
     }
 
+    public Mono<String> getUOByCellular(String idSession, String cellular) {
+        return Mono.fromCallable(() -> {
+            try {
+                String soapRequest = """
+                    <soapenv:Envelope 
+                        xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/" 
+                        xmlns:run="http://runtime.services.cash.innov.sn/">
+                       <soapenv:Header/>
+                       <soapenv:Body>
+                          <run:getUOByCellular>
+                             <idSession>%s</idSession>
+                             <cellular>%s</cellular>
+                          </run:getUOByCellular>
+                       </soapenv:Body>
+                    </soapenv:Envelope>
+                    """.formatted(idSession, cellular);
+    
+                return webClient.post()
+                        .uri(SOAP_ENDPOINT)
+                        .contentType(MediaType.TEXT_XML)
+                        .header("Authorization", "Bearer " + idSession) // Utilise le token comme idSession
+                        .bodyValue(soapRequest)
+                        .retrieve()
+                        .bodyToMono(String.class)
+                        .block();
+            } catch (Exception e) {
+                throw new RuntimeException("Erreur lors de l'appel getUOByCellular: " + e.getMessage());
+            }
+        }).subscribeOn(Schedulers.boundedElastic());
+    }
+
+    public Mono<String> getHistorySolde(String idSession, String accountId) {
+        return Mono.fromCallable(() -> {
+            String soapRequest = """
+                <soapenv:Envelope 
+                    xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/" 
+                    xmlns:run="http://runtime.services.cash.innov.sn/">
+                   <soapenv:Header/>
+                   <soapenv:Body>
+                      <run:getHistorySolde>
+                         <idSession>%s</idSession>
+                         <AccountId>%s</AccountId>
+                      </run:getHistorySolde>
+                   </soapenv:Body>
+                </soapenv:Envelope>
+                """.formatted(idSession, accountId);
+    
+            return webClient.post()
+                    .uri(SOAP_ENDPOINT)
+                    .contentType(MediaType.TEXT_XML)
+                    .header("Authorization", "Bearer " + idSession)
+                    .bodyValue(soapRequest)
+                    .retrieve()
+                    .bodyToMono(String.class)
+                    .block();
+        }).subscribeOn(Schedulers.boundedElastic());
+    }
     
     private AuthResult parseResponse(String soapResponse) {
         try {
