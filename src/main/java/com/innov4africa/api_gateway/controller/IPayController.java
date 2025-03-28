@@ -5,6 +5,8 @@ import com.innov4africa.api_gateway.model.HistoryResponse;
 import com.innov4africa.api_gateway.model.LogoutResponse;
 import com.innov4africa.api_gateway.model.ServiceStatus;
 import com.innov4africa.api_gateway.model.SoldeResponse;
+import com.innov4africa.api_gateway.model.Transaction;
+import com.innov4africa.api_gateway.model.TransactionResponse;
 import com.innov4africa.api_gateway.model.UO;
 import com.innov4africa.api_gateway.model.UOResponse;
 import com.innov4africa.api_gateway.service.IPayService;
@@ -16,11 +18,13 @@ import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 import org.w3c.dom.Document;
+import org.w3c.dom.NodeList;
 import org.xml.sax.InputSource;
 import reactor.core.publisher.Mono;
 
 import javax.xml.parsers.DocumentBuilderFactory;
 import javax.xml.xpath.XPath;
+import javax.xml.xpath.XPathConstants;
 import javax.xml.xpath.XPathFactory;
 import java.io.StringReader;
 import java.util.ArrayList;
@@ -367,6 +371,141 @@ public class IPayController {
                 return Mono.just(ResponseEntity.internalServerError().body(
                     new LogoutResponse("error", "Service indisponible",
                         List.of(new ServiceStatus("i-pay", false, "Erreur de communication")))
+                ));
+            });
+    }
+
+    /**
+     * Endpoint pour récupérer les transactions d'un compte
+     * @param authHeader Le header d'autorisation contenant le JWT
+     * @return Une réponse contenant la liste des transactions et leur nombre total
+     */
+    @GetMapping("/operations")
+    public Mono<ResponseEntity<TransactionResponse>> getOperations(@RequestHeader(value = "Authorization", required = false) String authHeader) {
+        // 1. Vérification de la présence du header Authorization
+        if (authHeader == null || authHeader.isBlank()) {
+            logger.warn("Tentative d'accès aux opérations sans header Authorization");
+            return buildUnauthorizedResponse(
+                new TransactionResponse("error", "Token d'authentification manquant", 0, null,
+                    List.of(new ServiceStatus("i-pay", false, "Non autorisé")))
+            );
+        }
+
+        // 2. Vérification du format Bearer
+        if (!authHeader.startsWith("Bearer ")) {
+            logger.warn("Format de token invalide pour les opérations: {}", authHeader);
+            return buildUnauthorizedResponse(
+                new TransactionResponse("error", "Format de token invalide", 0, null,
+                    List.of(new ServiceStatus("i-pay", false, "Non autorisé")))
+            );
+        }
+
+        String jwt = authHeader.substring(7);
+        
+        // 3. Validation du token JWT
+        if (!jwtUtil.validateToken(jwt)) {
+            logger.warn("Token JWT invalide ou expiré pour les opérations");
+            return buildUnauthorizedResponse(
+                new TransactionResponse("error", "Token invalide ou expiré", 0, null,
+                    List.of(new ServiceStatus("i-pay", false, "Non autorisé")))
+            );
+        }
+
+        // 4. Extraction des claims
+        // String userId = jwtUtil.extractUserId(jwt);
+        String userId = "100";
+        String ipayToken = jwtUtil.extractIpayToken(jwt);
+        
+        if (userId == null || ipayToken == null) {
+            logger.warn("Token ne contient pas les claims requis - userId: {}, ipayToken: {}", userId, ipayToken);
+            return buildUnauthorizedResponse(
+                new TransactionResponse("error", "Token incomplet", 0, null,
+                    List.of(new ServiceStatus("i-pay", false, "Non autorisé")))
+            );
+        }
+
+        logger.info("Demande des opérations pour l'utilisateur ID: {}", userId);
+        
+        // 5. Appel du service IPay
+        return ipayService.getOperationCompte(ipayToken, userId)
+            .flatMap(xmlResponse -> {
+                try {
+                    Document doc = DocumentBuilderFactory.newInstance()
+                            .newDocumentBuilder()
+                            .parse(new InputSource(new StringReader(xmlResponse)));
+                    
+                    XPath xpath = XPathFactory.newInstance().newXPath();
+                    String error = xpath.evaluate("//return/error", doc);
+                    String message = xpath.evaluate("//return/message", doc);
+                    String totalStr = xpath.evaluate("//return/total", doc);
+                    
+                    Integer total = totalStr != null && !totalStr.isEmpty() ? Integer.parseInt(totalStr) : 0;
+
+                    if ("0".equals(error)) {
+                        List<Transaction> transactions = new ArrayList<>();
+                        
+                        // Si des opérations existent dans la réponse (dans le cas où total > 0)
+                        if (total > 0) {
+                            try {
+                                NodeList operations = (NodeList) xpath.evaluate("//return/operations/item", doc, XPathConstants.NODESET);
+                                for (int i = 0; i < operations.getLength(); i++) {
+                                    String date = xpath.evaluate("date", operations.item(i));
+                                    String montant = xpath.evaluate("montant", operations.item(i));
+                                    String type = xpath.evaluate("type", operations.item(i));
+                                    String description = xpath.evaluate("description", operations.item(i));
+                                    String reference = xpath.evaluate("reference", operations.item(i));
+                                    
+                                    transactions.add(new Transaction(date, montant, type, description, reference));
+                                }
+                            } catch (Exception e) {
+                                logger.warn("Erreur lors du parsing des opérations: {}", e.getMessage());
+                            }
+                        }
+                        
+                        return Mono.just(ResponseEntity.ok(
+                            new TransactionResponse(
+                                "success", 
+                                message, 
+                                total, 
+                                transactions, 
+                                List.of(new ServiceStatus("i-pay", true, "Opérations récupérées"))
+                            )
+                        ));
+                    } else {
+                        logger.warn("Erreur IPay lors de la récupération des opérations: {}", message);
+                        return Mono.just(ResponseEntity.badRequest().body(
+                            new TransactionResponse(
+                                "error",
+                                message,
+                                0,
+                                null,
+                                List.of(new ServiceStatus("i-pay", false, message))
+                            )
+                        ));
+                    }
+                } catch (Exception e) {
+                    logger.error("Erreur de traitement de la réponse XML pour les opérations", e);
+                    return Mono.just(ResponseEntity.internalServerError().body(
+                        new TransactionResponse(
+                            "error",
+                            "Erreur technique",
+                            0,
+                            null,
+                            List.of(new ServiceStatus("i-pay", false, "Erreur de traitement"))
+                        )
+                    ));
+                }
+            })
+            .onErrorResume(e -> {
+                logger.error("Erreur lors de l'appel au service IPay pour les opérations", e);
+                return Mono.just(ResponseEntity.internalServerError().body(
+                    new TransactionResponse(
+                        "error",
+                        "Service indisponible",
+                        0,
+                        null,
+                        List.of(new ServiceStatus("i-pay", false, "Erreur de communication"))
+                    )
                 ));
             });
     }

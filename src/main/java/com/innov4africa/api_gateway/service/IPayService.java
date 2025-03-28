@@ -228,6 +228,53 @@ public class IPayService {
         }).subscribeOn(Schedulers.boundedElastic());
     }
     
+    /**
+     * Récupère la liste des opérations effectuées sur un compte
+     * @param sessionId Le token de session IPay
+     * @param accountId L'identifiant du compte
+     * @return Une réponse SOAP contenant la liste des opérations et leur nombre total
+     */
+    public Mono<String> getOperationCompte(String sessionId, String accountId) {
+        return Mono.fromCallable(() -> {
+            try {
+                logger.info("Récupération des opérations pour le compte: {}", accountId);
+
+                String soapRequest = """
+                    <soapenv:Envelope 
+                        xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/" 
+                        xmlns:run="http://runtime.services.cash.innov.sn/">
+                       <soapenv:Header/>
+                       <soapenv:Body>
+                          <run:getOperationCompte>
+                             <sessionId>%s</sessionId>
+                             <accountId>%s</accountId>
+                          </run:getOperationCompte>
+                       </soapenv:Body>
+                    </soapenv:Envelope>
+                    """.formatted(sessionId, accountId);
+
+                logger.debug("Requête SOAP pour les opérations:\n{}", soapRequest);
+
+                String response = webClient.post()
+                        .uri(SOAP_ENDPOINT)
+                        .contentType(MediaType.TEXT_XML)
+                        .header("Authorization", "Bearer " + sessionId)
+                        .accept(MediaType.TEXT_XML)
+                        .bodyValue(soapRequest)
+                        .retrieve()
+                        .bodyToMono(String.class)
+                        .block();
+
+                logger.debug("Réponse SOAP pour les opérations:\n{}", response);
+                return response;
+
+            } catch (Exception e) {
+                logger.error("Erreur lors de la récupération des opérations", e);
+                throw new RuntimeException("Erreur technique lors de la récupération des opérations: " + e.getMessage());
+            }
+        }).subscribeOn(Schedulers.boundedElastic());
+    }
+    
     private AuthResult parseResponse(String soapResponse) {
         try {
             DocumentBuilderFactory factory = DocumentBuilderFactory.newInstance();
