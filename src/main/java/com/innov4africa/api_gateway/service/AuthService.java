@@ -3,16 +3,22 @@ package com.innov4africa.api_gateway.service;
 import com.innov4africa.api_gateway.model.AuthRequest;
 import com.innov4africa.api_gateway.model.AuthResponse;
 import com.innov4africa.api_gateway.model.ServiceStatus;
+
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import reactor.core.publisher.Mono;
 
 import java.util.List;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 
 
 @Service
 public class AuthService {
+
+    private static final Logger logger = LoggerFactory.getLogger(AuthService.class);
+
 
     @Autowired
     private IPayService ipayService;
@@ -27,6 +33,12 @@ public class AuthService {
         return ipayService.authenticate(email, password)
             .map(authResult -> {
                 if (authResult.isSuccess()) {
+
+                    // Afficher le token IPay dans les logs
+                    logger.info("Token IPay reçu: {}", authResult.getToken());
+                    logger.info("Téléphone IPay: {}", authResult.getTelephone());
+                    logger.info("User ID: {}", authResult.getIduser());
+                    
                     // Génère le JWT avec toutes les infos IPay
                     String jwtToken = jwtUtil.generateIpayToken(
                         email,

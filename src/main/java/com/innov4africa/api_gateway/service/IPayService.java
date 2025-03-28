@@ -249,6 +249,7 @@ public class IPayService {
         }).subscribeOn(Schedulers.boundedElastic());
     }
 
+    
     private AuthResult parseResponse(String soapResponse) {
         try {
             DocumentBuilderFactory factory = DocumentBuilderFactory.newInstance();
