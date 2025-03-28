@@ -2,6 +2,7 @@ package com.innov4africa.api_gateway.controller;
 
 import com.innov4africa.api_gateway.model.HistoryItem;
 import com.innov4africa.api_gateway.model.HistoryResponse;
+import com.innov4africa.api_gateway.model.LogoutResponse;
 import com.innov4africa.api_gateway.model.ServiceStatus;
 import com.innov4africa.api_gateway.model.SoldeResponse;
 import com.innov4africa.api_gateway.model.UO;
@@ -190,96 +191,185 @@ public class IPayController {
     }
 
     @GetMapping("/history")
-public Mono<ResponseEntity<HistoryResponse>> getHistorySolde(@RequestHeader(value = "Authorization", required = false) String authHeader) {
-    // Vérifications du token (comme pour les autres endpoints)
-    if (authHeader == null || authHeader.isBlank()) {
-        return buildUnauthorizedResponse(
-            new HistoryResponse("error", "Token manquant", null, 
-                List.of(new ServiceStatus("i-pay", false, "Non autorisé"))));
-    }
+    public Mono<ResponseEntity<HistoryResponse>> getHistorySolde(@RequestHeader(value = "Authorization", required = false) String authHeader) {
+        // Vérifications du token (comme pour les autres endpoints)
+        if (authHeader == null || authHeader.isBlank()) {
+            return buildUnauthorizedResponse(
+                new HistoryResponse("error", "Token manquant", null, 
+                    List.of(new ServiceStatus("i-pay", false, "Non autorisé"))));
+        }
 
-    if (!authHeader.startsWith("Bearer ")) {
-        return buildUnauthorizedResponse(
-            new HistoryResponse("error", "Format token invalide", null,
-                List.of(new ServiceStatus("i-pay", false, "Non autorisé"))));
-    }
+        if (!authHeader.startsWith("Bearer ")) {
+            return buildUnauthorizedResponse(
+                new HistoryResponse("error", "Format token invalide", null,
+                    List.of(new ServiceStatus("i-pay", false, "Non autorisé"))));
+        }
 
-    String jwt = authHeader.substring(7);
-    if (!jwtUtil.validateToken(jwt)) {
-        return buildUnauthorizedResponse(
-            new HistoryResponse("error", "Token invalide/expiré", null,
-                List.of(new ServiceStatus("i-pay", false, "Non autorisé"))));
-    }
+        String jwt = authHeader.substring(7);
+        if (!jwtUtil.validateToken(jwt)) {
+            return buildUnauthorizedResponse(
+                new HistoryResponse("error", "Token invalide/expiré", null,
+                    List.of(new ServiceStatus("i-pay", false, "Non autorisé"))));
+        }
 
-    String ipayToken = jwtUtil.extractIpayToken(jwt);
-    String userId = jwtUtil.extractUserId(jwt);
-    
-    if (ipayToken == null || userId == null) {
-        return buildUnauthorizedResponse(
-            new HistoryResponse("error", "Token incomplet", null,
-                List.of(new ServiceStatus("i-pay", false, "Non autorisé"))));
-    }
+        String ipayToken = jwtUtil.extractIpayToken(jwt);
+        String userId = jwtUtil.extractUserId(jwt);
+        
+        if (ipayToken == null || userId == null) {
+            return buildUnauthorizedResponse(
+                new HistoryResponse("error", "Token incomplet", null,
+                    List.of(new ServiceStatus("i-pay", false, "Non autorisé"))));
+        }
 
-    return ipayService.getHistorySolde(ipayToken, userId)
-        .flatMap(xmlResponse -> {
-            try {
-                Document doc = DocumentBuilderFactory.newInstance()
-                        .newDocumentBuilder()
-                        .parse(new InputSource(new StringReader(xmlResponse)));
-                
-                XPath xpath = XPathFactory.newInstance().newXPath();
-                String error = xpath.evaluate("//return/error", doc);
-                String message = xpath.evaluate("//return/message", doc);
-
-                if ("0".equals(error)) {
-                    List<HistoryItem> historyItems = new ArrayList<>();
+        return ipayService.getHistorySolde(ipayToken, userId)
+            .flatMap(xmlResponse -> {
+                try {
+                    Document doc = DocumentBuilderFactory.newInstance()
+                            .newDocumentBuilder()
+                            .parse(new InputSource(new StringReader(xmlResponse)));
                     
-                    // Si le message indique "Aucune opération"
-                    if ("Aucune opération".equals(message)) {
+                    XPath xpath = XPathFactory.newInstance().newXPath();
+                    String error = xpath.evaluate("//return/error", doc);
+                    String message = xpath.evaluate("//return/message", doc);
+
+                    if ("0".equals(error)) {
+                        List<HistoryItem> historyItems = new ArrayList<>();
+                        
+                        // Si le message indique "Aucune opération"
+                        if ("Aucune opération".equals(message)) {
+                            return Mono.just(ResponseEntity.ok(
+                                new HistoryResponse("success", message, historyItems,
+                                    List.of(new ServiceStatus("i-pay", true, message)))
+                            ));
+                        }
+                        
+                        // Sinon, traitement normal de l'historique
+                        // (à adapter selon la structure exacte de la réponse)
+                        // NodeList items = (NodeList) xpath.evaluate("//return/history/item", doc, XPathConstants.NODESET);
+                        // for(int i = 0; i < items.getLength(); i++) {
+                        //     Node item = items.item(i);
+                        //     historyItems.add(new HistoryItem(
+                        //         xpath.evaluate("date", item),
+                        //         xpath.evaluate("montant", item),
+                        //         xpath.evaluate("operation", item)
+                        //     ));
+                        // }
+                        
                         return Mono.just(ResponseEntity.ok(
                             new HistoryResponse("success", message, historyItems,
-                                List.of(new ServiceStatus("i-pay", true, message)))
+                                List.of(new ServiceStatus("i-pay", true, "Historique récupéré")))
+                        ));
+                    } else {
+                        return Mono.just(ResponseEntity.badRequest().body(
+                            new HistoryResponse("error", message, null,
+                                List.of(new ServiceStatus("i-pay", false, message)))
                         ));
                     }
-                    
-                    // Sinon, traitement normal de l'historique
-                    // (à adapter selon la structure exacte de la réponse)
-                    // NodeList items = (NodeList) xpath.evaluate("//return/history/item", doc, XPathConstants.NODESET);
-                    // for(int i = 0; i < items.getLength(); i++) {
-                    //     Node item = items.item(i);
-                    //     historyItems.add(new HistoryItem(
-                    //         xpath.evaluate("date", item),
-                    //         xpath.evaluate("montant", item),
-                    //         xpath.evaluate("operation", item)
-                    //     ));
-                    // }
-                    
-                    return Mono.just(ResponseEntity.ok(
-                        new HistoryResponse("success", message, historyItems,
-                            List.of(new ServiceStatus("i-pay", true, "Historique récupéré")))
-                    ));
-                } else {
-                    return Mono.just(ResponseEntity.badRequest().body(
-                        new HistoryResponse("error", message, null,
-                            List.of(new ServiceStatus("i-pay", false, message)))
+                } catch (Exception e) {
+                    return Mono.just(ResponseEntity.internalServerError().body(
+                        new HistoryResponse("error", "Erreur technique", null,
+                            List.of(new ServiceStatus("i-pay", false, "Erreur de traitement")))
                     ));
                 }
-            } catch (Exception e) {
+            })
+            .onErrorResume(e -> {
                 return Mono.just(ResponseEntity.internalServerError().body(
-                    new HistoryResponse("error", "Erreur technique", null,
-                        List.of(new ServiceStatus("i-pay", false, "Erreur de traitement")))
+                    new HistoryResponse("error", "Service indisponible", null,
+                        List.of(new ServiceStatus("i-pay", false, "Erreur de communication")))
                 ));
-            }
-        })
-        .onErrorResume(e -> {
-            return Mono.just(ResponseEntity.internalServerError().body(
-                new HistoryResponse("error", "Service indisponible", null,
-                    List.of(new ServiceStatus("i-pay", false, "Erreur de communication")))
+            });
+    }
+
+    /**
+     * Endpoint pour déconnecter un utilisateur (logout)
+     * @param authHeader Le header d'autorisation contenant le JWT
+     * @return Une réponse indiquant le succès ou l'échec de la déconnexion
+     */
+    @PostMapping("/logout")
+    public Mono<ResponseEntity<LogoutResponse>> deconnexionUser(@RequestHeader(value = "Authorization", required = false) String authHeader) {
+        // 1. Vérification de la présence du header Authorization
+        if (authHeader == null || authHeader.isBlank()) {
+            logger.warn("Tentative de déconnexion sans header Authorization");
+            return Mono.just(ResponseEntity.status(HttpStatus.UNAUTHORIZED).body(
+                new LogoutResponse("error", "Token d'authentification manquant",
+                    List.of(new ServiceStatus("i-pay", false, "Non autorisé")))
             ));
-        });
-}
+        }
 
+        // 2. Vérification du format Bearer
+        if (!authHeader.startsWith("Bearer ")) {
+            logger.warn("Format de token invalide lors de la déconnexion: {}", authHeader);
+            return Mono.just(ResponseEntity.status(HttpStatus.UNAUTHORIZED).body(
+                new LogoutResponse("error", "Format de token invalide",
+                    List.of(new ServiceStatus("i-pay", false, "Non autorisé")))
+            ));
+        }
 
+        String jwt = authHeader.substring(7);
+        
+        // 3. Validation du token JWT
+        if (!jwtUtil.validateToken(jwt)) {
+            logger.warn("Token JWT invalide ou expiré lors de la déconnexion");
+            return Mono.just(ResponseEntity.status(HttpStatus.UNAUTHORIZED).body(
+                new LogoutResponse("error", "Token invalide ou expiré",
+                    List.of(new ServiceStatus("i-pay", false, "Non autorisé")))
+            ));
+        }
+
+        // 4. Extraction du token IPay
+        String ipayToken = jwtUtil.extractIpayToken(jwt);
+        
+        if (ipayToken == null) {
+            logger.warn("Token ne contient pas le token IPay");
+            return Mono.just(ResponseEntity.status(HttpStatus.UNAUTHORIZED).body(
+                new LogoutResponse("error", "Token incomplet",
+                    List.of(new ServiceStatus("i-pay", false, "Non autorisé")))
+            ));
+        }
+
+        logger.info("Demande de déconnexion avec le token IPay: {}", ipayToken);
+        
+        // 5. Appel du service IPay pour la déconnexion
+        return ipayService.deconnexionUser(ipayToken)
+            .flatMap(xmlResponse -> {
+                try {
+                    Document doc = DocumentBuilderFactory.newInstance()
+                            .newDocumentBuilder()
+                            .parse(new InputSource(new StringReader(xmlResponse)));
+                    
+                    XPath xpath = XPathFactory.newInstance().newXPath();
+                    String code = xpath.evaluate("//return/code", doc);
+                    String message = xpath.evaluate("//return/message", doc);
+
+                    if ("1".equals(code)) {
+                        logger.info("Déconnexion réussie");
+                        return Mono.just(ResponseEntity.ok(
+                            new LogoutResponse("success", "Déconnexion réussie", 
+                                List.of(new ServiceStatus("i-pay", true, message)))
+                        ));
+                    } else {
+                        logger.warn("Échec de déconnexion: {} - {}", code, message);
+                        return Mono.just(ResponseEntity.badRequest().body(
+                            new LogoutResponse("error", message,
+                                List.of(new ServiceStatus("i-pay", false, "Échec de déconnexion")))
+                        ));
+                    }
+                } catch (Exception e) {
+                    logger.error("Erreur lors du traitement de la réponse de déconnexion", e);
+                    return Mono.just(ResponseEntity.internalServerError().body(
+                        new LogoutResponse("error", "Erreur technique",
+                            List.of(new ServiceStatus("i-pay", false, "Erreur de traitement")))
+                    ));
+                }
+            })
+            .onErrorResume(e -> {
+                logger.error("Erreur lors de l'appel au service de déconnexion", e);
+                return Mono.just(ResponseEntity.internalServerError().body(
+                    new LogoutResponse("error", "Service indisponible",
+                        List.of(new ServiceStatus("i-pay", false, "Erreur de communication")))
+                ));
+            });
+    }
 
     private Mono<ResponseEntity<SoldeResponse>> handleSoapResponse(String xmlResponse) {
         try {
