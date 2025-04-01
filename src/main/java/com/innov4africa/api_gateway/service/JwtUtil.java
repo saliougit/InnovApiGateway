@@ -35,6 +35,17 @@ public class JwtUtil {
         claims.put("userId", userId);
         return createToken(claims, username);
     }
+    
+    // Version améliorée avec nom et prénom pour les besoins du SMS Pay
+    public String generateIpayTokenWithUserInfo(String username, String ipayToken, String telephone, String userId, String nom, String prenom) {
+        Map<String, Object> claims = new HashMap<>();
+        claims.put("ipayToken", ipayToken);
+        claims.put("telephone", telephone);
+        claims.put("userId", userId);
+        claims.put("nom", nom);
+        claims.put("prenom", prenom);
+        return createToken(claims, username);
+    }
 
     // Version basique (conservée pour compatibilité)
     public String generateToken(String username) {
@@ -74,6 +85,15 @@ public class JwtUtil {
 
     public String extractUserId(String token) {
         return extractClaim(token, claims -> claims.get("userId", String.class));
+    }
+    
+    // Nouvelles méthodes pour extraire le nom et le prénom du token JWT
+    public String extractNom(String token) {
+        return extractClaim(token, claims -> claims.get("nom", String.class));
+    }
+    
+    public String extractPrenom(String token) {
+        return extractClaim(token, claims -> claims.get("prenom", String.class));
     }
 
     // Méthodes existantes conservées

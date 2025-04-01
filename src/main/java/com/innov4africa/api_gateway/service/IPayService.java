@@ -389,6 +389,68 @@ public class IPayService {
         }).subscribeOn(Schedulers.boundedElastic());
     }
     
+    /**
+     * Envoi un code de paiement par SMS
+     * @param envoyeurTel Le numéro de téléphone de l'expéditeur
+     * @param beneficiaireTel Le numéro de téléphone du bénéficiaire
+     * @param montant Le montant du paiement
+     * @param numeros Numéro de référence (optionnel)
+     * @param nom Le nom de l'utilisateur
+     * @param prenom Le prénom de l'utilisateur
+     * @return Une réponse SOAP contenant le résultat de l'opération
+     */
+    public Mono<String> smsPayCodeGFact(
+            String envoyeurTel, 
+            String beneficiaireTel, 
+            String montant, 
+            String numeros,
+            String nom,
+            String prenom) {
+        
+        return Mono.fromCallable(() -> {
+            try {
+                logger.info("Tentative d'envoi de code de paiement par SMS de {} à {}, montant: {}", 
+                    envoyeurTel, beneficiaireTel, montant);
+
+                String soapRequest = """
+                    <soapenv:Envelope 
+                        xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/" 
+                        xmlns:run="http://runtime.services.cash.innov.sn/">
+                       <soapenv:Header/>
+                       <soapenv:Body>
+                          <run:SmsPayCodeG_FACT>
+                             <envoyeurtel>%s</envoyeurtel>
+                             <beneficiairetel>%s</beneficiairetel>
+                             <montant>%s</montant>
+                             <numeros>%s</numeros>
+                             <nom>%s</nom>
+                             <prenom>%s</prenom>
+                          </run:SmsPayCodeG_FACT>
+                       </soapenv:Body>
+                    </soapenv:Envelope>
+                    """.formatted(envoyeurTel, beneficiaireTel, montant, numeros, nom, prenom);
+
+                logger.debug("Requête SOAP pour l'envoi de code de paiement:\n{}", soapRequest);
+
+                String response = webClient.post()
+                        .uri(SOAP_ENDPOINT)
+                        .contentType(MediaType.TEXT_XML)
+                        .accept(MediaType.TEXT_XML)
+                        .bodyValue(soapRequest)
+                        .retrieve()
+                        .bodyToMono(String.class)
+                        .block();
+
+                logger.debug("Réponse SOAP pour l'envoi de code de paiement:\n{}", response);
+                return response;
+
+            } catch (Exception e) {
+                logger.error("Erreur lors de l'envoi du code de paiement", e);
+                throw new RuntimeException("Erreur technique lors de l'envoi du code de paiement: " + e.getMessage());
+            }
+        }).subscribeOn(Schedulers.boundedElastic());
+    }
+    
     private AuthResult parseResponse(String soapResponse) {
         try {
             DocumentBuilderFactory factory = DocumentBuilderFactory.newInstance();
