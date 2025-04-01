@@ -793,7 +793,11 @@ public class IPayController {
 
         /**
      * Endpoint pour envoyer un code de paiement par SMS
-     * @param authHeader Le header d'autorisation contenant le JWT
+     * @param authH    {
+      "beneficiaireTel": "783198156",
+      "montant": "0",
+      "numeros": "?"
+    }eader Le header d'autorisation contenant le JWT
      * @param request La requête contenant les détails du paiement par SMS
      * @return Une réponse indiquant le succès ou l'échec de l'envoi du code de paiement
      */
