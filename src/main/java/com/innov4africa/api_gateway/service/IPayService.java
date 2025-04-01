@@ -322,6 +322,73 @@ public class IPayService {
         }).subscribeOn(Schedulers.boundedElastic());
     }
     
+    /**
+     * Effectue un virement compte à compte
+     * @param sessionId Le token de session IPay
+     * @param montant Le montant à transférer
+     * @param commission La commission du transfert (0 par défaut)
+     * @param idAccountEnvoyeur L'identifiant du compte émetteur
+     * @param idAccountBeneficiary L'identifiant du compte bénéficiaire
+     * @param objet L'objet du virement (optionnel)
+     * @param commissionRetrait La commission de retrait (0 par défaut)
+     * @return Une réponse SOAP contenant le résultat du virement
+     */
+    public Mono<String> w2wVirementAccount(
+            String sessionId, 
+            String montant, 
+            String commission, 
+            String idAccountEnvoyeur,
+            String idAccountBeneficiary, 
+            String objet,
+            String commissionRetrait) {
+        
+        return Mono.fromCallable(() -> {
+            try {
+                logger.info("Tentative de virement du compte {} vers le compte {}, montant: {}", 
+                    idAccountEnvoyeur, idAccountBeneficiary, montant);
+
+                String soapRequest = """
+                    <soapenv:Envelope 
+                        xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/" 
+                        xmlns:run="http://runtime.services.cash.innov.sn/">
+                       <soapenv:Header/>
+                       <soapenv:Body>
+                          <run:W2WVirementAccount>
+                             <sessionId>%s</sessionId>
+                             <montant>%s</montant>
+                             <commission>%s</commission>
+                             <idAccountEnvoyeur>%s</idAccountEnvoyeur>
+                             <idAccountBeneficiary>%s</idAccountBeneficiary>
+                             <objet>%s</objet>
+                             <commissionRetrait>%s</commissionRetrait>
+                          </run:W2WVirementAccount>
+                       </soapenv:Body>
+                    </soapenv:Envelope>
+                    """.formatted(sessionId, montant, commission, idAccountEnvoyeur, 
+                        idAccountBeneficiary, objet, commissionRetrait);
+
+                logger.debug("Requête SOAP pour le virement:\n{}", soapRequest);
+
+                String response = webClient.post()
+                        .uri(SOAP_ENDPOINT)
+                        .contentType(MediaType.TEXT_XML)
+                        .header("Authorization", "Bearer " + sessionId)
+                        .accept(MediaType.TEXT_XML)
+                        .bodyValue(soapRequest)
+                        .retrieve()
+                        .bodyToMono(String.class)
+                        .block();
+
+                logger.debug("Réponse SOAP pour le virement:\n{}", response);
+                return response;
+
+            } catch (Exception e) {
+                logger.error("Erreur lors du virement", e);
+                throw new RuntimeException("Erreur technique lors du virement: " + e.getMessage());
+            }
+        }).subscribeOn(Schedulers.boundedElastic());
+    }
+    
     private AuthResult parseResponse(String soapResponse) {
         try {
             DocumentBuilderFactory factory = DocumentBuilderFactory.newInstance();

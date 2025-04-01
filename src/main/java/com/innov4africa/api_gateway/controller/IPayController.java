@@ -9,6 +9,8 @@ import com.innov4africa.api_gateway.model.ServiceStatus;
 import com.innov4africa.api_gateway.model.SoldeResponse;
 import com.innov4africa.api_gateway.model.Transaction;
 import com.innov4africa.api_gateway.model.TransactionResponse;
+import com.innov4africa.api_gateway.model.TransferRequest;
+import com.innov4africa.api_gateway.model.TransferResponse;
 import com.innov4africa.api_gateway.model.UO;
 import com.innov4africa.api_gateway.model.UOResponse;
 import com.innov4africa.api_gateway.service.IPayService;
@@ -639,6 +641,154 @@ public class IPayController {
             });
     }
 
+   
+    /**
+     * Endpoint pour effectuer un virement compte à compte
+     * @param authHeader Le header d'autorisation contenant le JWT
+     * @param request La requête contenant les détails du virement
+     * @return Une réponse indiquant le succès ou l'échec du virement
+    */
+    @PostMapping("/transfer")
+    public Mono<ResponseEntity<TransferResponse>> transferFunds(
+            @RequestHeader(value = "Authorization", required = false) String authHeader,
+            @RequestBody TransferRequest request) {
+        
+        // 1. Vérification de la présence du header Authorization
+        if (authHeader == null || authHeader.isBlank()) {
+            logger.warn("Tentative de virement sans header Authorization");
+            return buildUnauthorizedResponse(
+                new TransferResponse("error", "Token d'authentification manquant", null,
+                    List.of(new ServiceStatus("i-pay", false, "Non autorisé")))
+            );
+        }
+
+        // 2. Vérification du format Bearer
+        if (!authHeader.startsWith("Bearer ")) {
+            logger.warn("Format de token invalide pour le virement: {}", authHeader);
+            return buildUnauthorizedResponse(
+                new TransferResponse("error", "Format de token invalide", null,
+                    List.of(new ServiceStatus("i-pay", false, "Non autorisé")))
+            );
+        }
+
+        String jwt = authHeader.substring(7);
+        
+        // 3. Validation du token JWT
+        if (!jwtUtil.validateToken(jwt)) {
+            logger.warn("Token JWT invalide ou expiré pour le virement");
+            return buildUnauthorizedResponse(
+                new TransferResponse("error", "Token invalide ou expiré", null,
+                    List.of(new ServiceStatus("i-pay", false, "Non autorisé")))
+            );
+        }
+
+        // 4. Extraction des claims nécessaires
+        String userId = jwtUtil.extractUserId(jwt);
+        String ipayToken = jwtUtil.extractIpayToken(jwt);
+        
+        if (userId == null || ipayToken == null) {
+            logger.warn("Token ne contient pas les claims requis - userId: {}, ipayToken: {}", userId, ipayToken);
+            return buildUnauthorizedResponse(
+                new TransferResponse("error", "Token incomplet", null,
+                    List.of(new ServiceStatus("i-pay", false, "Non autorisé")))
+            );
+        }
+
+        // 5. Validation des données de la requête
+        String montant = request.getMontant();
+        String idAccountBeneficiary = request.getIdAccountBeneficiary();
+        
+        if (montant == null || montant.isBlank() || idAccountBeneficiary == null || idAccountBeneficiary.isBlank()) {
+            logger.warn("Données de virement incomplètes - montant: {}, idAccountBeneficiary: {}", montant, idAccountBeneficiary);
+            return Mono.just(ResponseEntity.badRequest().body(
+                new TransferResponse("error", "Données de virement incomplètes", null,
+                    List.of(new ServiceStatus("i-pay", false, "Données invalides")))
+            ));
+        }
+        
+        try {
+            // Vérification que le montant est un nombre positif
+            double amount = Double.parseDouble(montant);
+            if (amount <= 0) {
+                return Mono.just(ResponseEntity.badRequest().body(
+                    new TransferResponse("error", "Montant invalide", null,
+                        List.of(new ServiceStatus("i-pay", false, "Montant doit être positif")))
+                ));
+            }
+        } catch (NumberFormatException e) {
+            return Mono.just(ResponseEntity.badRequest().body(
+                new TransferResponse("error", "Format de montant invalide", null,
+                    List.of(new ServiceStatus("i-pay", false, "Montant doit être un nombre")))
+            ));
+        }
+
+        // 6. Initialisation des valeurs par défaut pour les champs optionnels
+        String commission = request.getCommission() != null ? request.getCommission() : "0";
+        String objet = request.getObjet() != null ? request.getObjet() : "";
+        String commissionRetrait = request.getCommissionRetrait() != null ? request.getCommissionRetrait() : "0";
+        
+        logger.info("Demande de virement du compte {} vers le compte {}, montant: {}", 
+            userId, idAccountBeneficiary, montant);
+        
+        // 7. Appel du service IPay
+        return ipayService.w2wVirementAccount(ipayToken, montant, commission, userId, 
+                idAccountBeneficiary, objet, commissionRetrait)
+            .flatMap(xmlResponse -> {
+                try {
+                    Document doc = DocumentBuilderFactory.newInstance()
+                            .newDocumentBuilder()
+                            .parse(new InputSource(new StringReader(xmlResponse)));
+                    
+                    XPath xpath = XPathFactory.newInstance().newXPath();
+                    String error = xpath.evaluate("//return/error", doc);
+                    String message = xpath.evaluate("//return/message", doc);
+                    String reference = xpath.evaluate("//return/reference", doc);
+
+                    if ("0".equals(error)) {
+                        logger.info("Virement réussi, référence: {}", reference);
+                        return Mono.just(ResponseEntity.ok(
+                            new TransferResponse(
+                                "success", 
+                                message, 
+                                reference, 
+                                List.of(new ServiceStatus("i-pay", true, "Virement effectué"))
+                            )
+                        ));
+                    } else {
+                        logger.warn("Échec du virement: {} - {}", error, message);
+                        return Mono.just(ResponseEntity.badRequest().body(
+                            new TransferResponse(
+                                "error",
+                                message,
+                                null,
+                                List.of(new ServiceStatus("i-pay", false, message))
+                            )
+                        ));
+                    }
+                } catch (Exception e) {
+                    logger.error("Erreur de traitement de la réponse XML pour le virement", e);
+                    return Mono.just(ResponseEntity.internalServerError().body(
+                        new TransferResponse(
+                            "error",
+                            "Erreur technique",
+                            null,
+                            List.of(new ServiceStatus("i-pay", false, "Erreur de traitement"))
+                        )
+                    ));
+                }
+            })
+            .onErrorResume(e -> {
+                logger.error("Erreur lors de l'appel au service IPay pour le virement", e);
+                return Mono.just(ResponseEntity.internalServerError().body(
+                    new TransferResponse(
+                        "error",
+                        "Service indisponible",
+                        null,
+                        List.of(new ServiceStatus("i-pay", false, "Erreur de communication"))
+                    )
+                ));
+            });
+    }
     private Mono<ResponseEntity<SoldeResponse>> handleSoapResponse(String xmlResponse) {
         try {
             Document doc = DocumentBuilderFactory.newInstance()
