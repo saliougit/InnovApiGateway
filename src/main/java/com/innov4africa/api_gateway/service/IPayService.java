@@ -275,6 +275,53 @@ public class IPayService {
         }).subscribeOn(Schedulers.boundedElastic());
     }
     
+    /**
+     * Récupère toutes les notifications d'un utilisateur
+     * @param sessionId Le token de session IPay
+     * @param uoId L'identifiant de l'utilisateur
+     * @return Une réponse SOAP contenant la liste des notifications
+     */
+    public Mono<String> getAllNotif(String sessionId, String uoId) {
+        return Mono.fromCallable(() -> {
+            try {
+                logger.info("Récupération des notifications pour l'utilisateur: {}", uoId);
+
+                String soapRequest = """
+                    <soapenv:Envelope 
+                        xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/" 
+                        xmlns:run="http://runtime.services.cash.innov.sn/">
+                       <soapenv:Header/>
+                       <soapenv:Body>
+                          <run:getAllNotif>
+                             <idSession>%s</idSession>
+                             <uoId>%s</uoId>
+                          </run:getAllNotif>
+                       </soapenv:Body>
+                    </soapenv:Envelope>
+                    """.formatted(sessionId, uoId);
+
+                logger.debug("Requête SOAP pour les notifications:\n{}", soapRequest);
+
+                String response = webClient.post()
+                        .uri(SOAP_ENDPOINT)
+                        .contentType(MediaType.TEXT_XML)
+                        .header("Authorization", "Bearer " + sessionId)
+                        .accept(MediaType.TEXT_XML)
+                        .bodyValue(soapRequest)
+                        .retrieve()
+                        .bodyToMono(String.class)
+                        .block();
+
+                logger.debug("Réponse SOAP pour les notifications:\n{}", response);
+                return response;
+
+            } catch (Exception e) {
+                logger.error("Erreur lors de la récupération des notifications", e);
+                throw new RuntimeException("Erreur technique lors de la récupération des notifications: " + e.getMessage());
+            }
+        }).subscribeOn(Schedulers.boundedElastic());
+    }
+    
     private AuthResult parseResponse(String soapResponse) {
         try {
             DocumentBuilderFactory factory = DocumentBuilderFactory.newInstance();

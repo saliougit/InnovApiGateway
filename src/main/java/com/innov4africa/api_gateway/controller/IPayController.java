@@ -3,6 +3,8 @@ package com.innov4africa.api_gateway.controller;
 import com.innov4africa.api_gateway.model.HistoryItem;
 import com.innov4africa.api_gateway.model.HistoryResponse;
 import com.innov4africa.api_gateway.model.LogoutResponse;
+import com.innov4africa.api_gateway.model.Notification;
+import com.innov4africa.api_gateway.model.NotificationResponse;
 import com.innov4africa.api_gateway.model.ServiceStatus;
 import com.innov4africa.api_gateway.model.SoldeResponse;
 import com.innov4africa.api_gateway.model.Transaction;
@@ -503,6 +505,133 @@ public class IPayController {
                         "error",
                         "Service indisponible",
                         0,
+                        null,
+                        List.of(new ServiceStatus("i-pay", false, "Erreur de communication"))
+                    )
+                ));
+            });
+    }
+
+    /**
+     * Endpoint pour récupérer les notifications d'un utilisateur
+     * @param authHeader Le header d'autorisation contenant le JWT
+     * @return Une réponse contenant la liste des notifications
+     */
+    @GetMapping("/notifications")
+    public Mono<ResponseEntity<NotificationResponse>> getNotifications(@RequestHeader(value = "Authorization", required = false) String authHeader) {
+        // 1. Vérification de la présence du header Authorization
+        if (authHeader == null || authHeader.isBlank()) {
+            logger.warn("Tentative d'accès aux notifications sans header Authorization");
+            return buildUnauthorizedResponse(
+                new NotificationResponse("error", "Token d'authentification manquant", null,
+                    List.of(new ServiceStatus("i-pay", false, "Non autorisé")))
+            );
+        }
+
+        // 2. Vérification du format Bearer
+        if (!authHeader.startsWith("Bearer ")) {
+            logger.warn("Format de token invalide pour les notifications: {}", authHeader);
+            return buildUnauthorizedResponse(
+                new NotificationResponse("error", "Format de token invalide", null,
+                    List.of(new ServiceStatus("i-pay", false, "Non autorisé")))
+            );
+        }
+
+        String jwt = authHeader.substring(7);
+        
+        // 3. Validation du token JWT
+        if (!jwtUtil.validateToken(jwt)) {
+            logger.warn("Token JWT invalide ou expiré pour les notifications");
+            return buildUnauthorizedResponse(
+                new NotificationResponse("error", "Token invalide ou expiré", null,
+                    List.of(new ServiceStatus("i-pay", false, "Non autorisé")))
+            );
+        }
+
+        // 4. Extraction des claims
+        String userId = jwtUtil.extractUserId(jwt);
+        String ipayToken = jwtUtil.extractIpayToken(jwt);
+        
+        if (userId == null || ipayToken == null) {
+            logger.warn("Token ne contient pas les claims requis - userId: {}, ipayToken: {}", userId, ipayToken);
+            return buildUnauthorizedResponse(
+                new NotificationResponse("error", "Token incomplet", null,
+                    List.of(new ServiceStatus("i-pay", false, "Non autorisé")))
+            );
+        }
+
+        logger.info("Demande des notifications pour l'utilisateur ID: {}", userId);
+        
+        // 5. Appel du service IPay
+        return ipayService.getAllNotif(ipayToken, userId)
+            .flatMap(xmlResponse -> {
+                try {
+                    Document doc = DocumentBuilderFactory.newInstance()
+                            .newDocumentBuilder()
+                            .parse(new InputSource(new StringReader(xmlResponse)));
+                    
+                    XPath xpath = XPathFactory.newInstance().newXPath();
+                    String error = xpath.evaluate("//return/error", doc);
+                    String message = xpath.evaluate("//return/message", doc);
+
+                    if ("0".equals(error)) {
+                        List<Notification> notifications = new ArrayList<>();
+                        
+                        // Si le message n'indique pas "Aucune notification", tenter de récupérer les notifications
+                        if (!"Aucune notification".equals(message)) {
+                            try {
+                                NodeList notifNodes = (NodeList) xpath.evaluate("//return/notifications/item", doc, XPathConstants.NODESET);
+                                for (int i = 0; i < notifNodes.getLength(); i++) {
+                                    String id = xpath.evaluate("id", notifNodes.item(i));
+                                    String date = xpath.evaluate("date", notifNodes.item(i));
+                                    String notifMessage = xpath.evaluate("message", notifNodes.item(i));
+                                    String type = xpath.evaluate("type", notifNodes.item(i));
+                                    String status = xpath.evaluate("status", notifNodes.item(i));
+                                    
+                                    notifications.add(new Notification(id, date, notifMessage, type, status));
+                                }
+                            } catch (Exception e) {
+                                logger.warn("Erreur lors du parsing des notifications: {}", e.getMessage());
+                            }
+                        }
+                        
+                        return Mono.just(ResponseEntity.ok(
+                            new NotificationResponse(
+                                "success", 
+                                message, 
+                                notifications, 
+                                List.of(new ServiceStatus("i-pay", true, "Notifications récupérées"))
+                            )
+                        ));
+                    } else {
+                        logger.warn("Erreur IPay lors de la récupération des notifications: {}", message);
+                        return Mono.just(ResponseEntity.badRequest().body(
+                            new NotificationResponse(
+                                "error",
+                                message,
+                                null,
+                                List.of(new ServiceStatus("i-pay", false, message))
+                            )
+                        ));
+                    }
+                } catch (Exception e) {
+                    logger.error("Erreur de traitement de la réponse XML pour les notifications", e);
+                    return Mono.just(ResponseEntity.internalServerError().body(
+                        new NotificationResponse(
+                            "error",
+                            "Erreur technique",
+                            null,
+                            List.of(new ServiceStatus("i-pay", false, "Erreur de traitement"))
+                        )
+                    ));
+                }
+            })
+            .onErrorResume(e -> {
+                logger.error("Erreur lors de l'appel au service IPay pour les notifications", e);
+                return Mono.just(ResponseEntity.internalServerError().body(
+                    new NotificationResponse(
+                        "error",
+                        "Service indisponible",
                         null,
                         List.of(new ServiceStatus("i-pay", false, "Erreur de communication"))
                     )
