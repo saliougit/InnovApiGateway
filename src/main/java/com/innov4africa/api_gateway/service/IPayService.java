@@ -520,7 +520,197 @@ public class IPayService {
             }
         }).subscribeOn(Schedulers.boundedElastic());
     }
+
+        /**
+     * Effectue un paiement de facture Senelec
+     * @param sessionId Le token de session IPay
+     * @param numeroPolice Le numéro de police d'abonnement
+     * @param numeroFacture Le numéro de facture
+     * @param montant Le montant à payer
+     * @param commission La commission
+     * @param cellular Le numéro de téléphone du client
+     * @param commagent La commission de l'agent
+     * @return Une réponse SOAP contenant le résultat du paiement
+     */
+    public Mono<String> paiementSenelec(
+            String sessionId, 
+            String numeroPolice, 
+            String numeroFacture, 
+            String montant, 
+            String commission, 
+            String cellular, 
+            String commagent) {
+        
+        return Mono.fromCallable(() -> {
+            try {
+                logger.info("Tentative de paiement Senelec pour la police: {}, facture: {}, montant: {}", 
+                    numeroPolice, numeroFacture, montant);
+
+                String soapRequest = """
+                    <soapenv:Envelope 
+                        xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/" 
+                        xmlns:run="http://runtime.services.cash.innov.sn/">
+                    <soapenv:Header/>
+                    <soapenv:Body>
+                        <run:paiementSenelec>
+                            <idSession>%s</idSession>
+                            <numeroPolice>%s</numeroPolice>
+                            <numeroFacture>%s</numeroFacture>
+                            <montant>%s</montant>
+                            <commission>%s</commission>
+                            <cellular>%s</cellular>
+                            <commagent>%s</commagent>
+                        </run:paiementSenelec>
+                    </soapenv:Body>
+                    </soapenv:Envelope>
+                    """.formatted(sessionId, numeroPolice, numeroFacture, montant, 
+                        commission, cellular, commagent);
+
+                logger.debug("Requête SOAP pour le paiement Senelec:\n{}", soapRequest);
+
+                String response = webClient.post()
+                        .uri(SOAP_ENDPOINT)
+                        .contentType(MediaType.TEXT_XML)
+                        .header("Authorization", "Bearer " + sessionId)
+                        .accept(MediaType.TEXT_XML)
+                        .bodyValue(soapRequest)
+                        .retrieve()
+                        .bodyToMono(String.class)
+                        .block();
+
+                logger.debug("Réponse SOAP pour le paiement Senelec:\n{}", response);
+                return response;
+
+            } catch (Exception e) {
+                logger.error("Erreur lors du paiement Senelec", e);
+                throw new RuntimeException("Erreur technique lors du paiement Senelec: " + e.getMessage());
+            }
+        }).subscribeOn(Schedulers.boundedElastic());
+    }
     
+            /**
+     * Effectue un paiement Woyofal
+     * @param sessionId Le token de session IPay
+     * @param numeroPolice Le numéro de police d'abonnement
+     * @param numeroTelephone Le numéro de téléphone associé au compteur
+     * @param montant Le montant à payer
+     * @param frais Les frais
+     * @param commission La commission
+     * @param cellular Le numéro de téléphone du client
+     * @return Une réponse SOAP contenant le résultat du paiement
+     */
+    public Mono<String> paiementWoyofal(
+        String sessionId, 
+        String numeroPolice, 
+        String numeroTelephone, 
+        String montant, 
+        String frais,
+        String commission, 
+        String cellular) {
+
+    return Mono.fromCallable(() -> {
+        try {
+            logger.info("Tentative de paiement Woyofal pour la police: {}, téléphone: {}, montant: {}", 
+                numeroPolice, numeroTelephone, montant);
+
+            String soapRequest = """
+                <soapenv:Envelope 
+                    xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/" 
+                    xmlns:run="http://runtime.services.cash.innov.sn/">
+                <soapenv:Header/>
+                <soapenv:Body>
+                    <run:paiementWoyofal>
+                        <idSession>%s</idSession>
+                        <numeroPolice>%s</numeroPolice>
+                        <numeroTelephone>%s</numeroTelephone>
+                        <montant>%s</montant>
+                        <frais>%s</frais>
+                        <commission>%s</commission>
+                        <cellular>%s</cellular>
+                    </run:paiementWoyofal>
+                </soapenv:Body>
+                </soapenv:Envelope>
+                """.formatted(sessionId, numeroPolice, numeroTelephone, montant, 
+                    frais, commission, cellular);
+
+            logger.debug("Requête SOAP pour le paiement Woyofal:\n{}", soapRequest);
+
+            String response = webClient.post()
+                    .uri(SOAP_ENDPOINT)
+                    .contentType(MediaType.TEXT_XML)
+                    .header("Authorization", "Bearer " + sessionId)
+                    .accept(MediaType.TEXT_XML)
+                    .bodyValue(soapRequest)
+                    .retrieve()
+                    .bodyToMono(String.class)
+                    .block();
+
+            logger.debug("Réponse SOAP pour le paiement Woyofal:\n{}", response);
+            return response;
+
+        } catch (Exception e) {
+            logger.error("Erreur lors du paiement Woyofal", e);
+            throw new RuntimeException("Erreur technique lors du paiement Woyofal: " + e.getMessage());
+        }
+    }).subscribeOn(Schedulers.boundedElastic());
+    }
+
+
+        /**
+     * Effectue un paiement sur la plateforme iShop
+     * @param numeros Le numéro de référence
+     * @param montant Le montant à payer
+     * @param order L'identifiant de la commande
+     * @param code Le code de paiement
+     * @return Une réponse SOAP contenant le résultat du paiement
+     */
+    public Mono<String> paymentIshop(
+        String numeros, 
+        String montant, 
+        String order, 
+        String code) {
+
+    return Mono.fromCallable(() -> {
+        try {
+            logger.info("Tentative de paiement iShop pour la commande: {}, montant: {}", order, montant);
+
+            String soapRequest = """
+                <soapenv:Envelope 
+                    xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/" 
+                    xmlns:run="http://runtime.services.cash.innov.sn/">
+                <soapenv:Header/>
+                <soapenv:Body>
+                    <run:paymentIshop>
+                        <numeros>%s</numeros>
+                        <montant>%s</montant>
+                        <order>%s</order>
+                        <code>%s</code>
+                    </run:paymentIshop>
+                </soapenv:Body>
+                </soapenv:Envelope>
+                """.formatted(numeros, montant, order, code);
+
+            logger.debug("Requête SOAP pour le paiement iShop:\n{}", soapRequest);
+
+            String response = webClient.post()
+                    .uri(SOAP_ENDPOINT)
+                    .contentType(MediaType.TEXT_XML)
+                    .accept(MediaType.TEXT_XML)
+                    .bodyValue(soapRequest)
+                    .retrieve()
+                    .bodyToMono(String.class)
+                    .block();
+
+            logger.debug("Réponse SOAP pour le paiement iShop:\n{}", response);
+            return response;
+
+        } catch (Exception e) {
+            logger.error("Erreur lors du paiement iShop", e);
+            throw new RuntimeException("Erreur technique lors du paiement iShop: " + e.getMessage());
+        }
+    }).subscribeOn(Schedulers.boundedElastic());
+    }
+
     private AuthResult parseResponse(String soapResponse) {
         try {
             DocumentBuilderFactory factory = DocumentBuilderFactory.newInstance();

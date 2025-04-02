@@ -2,11 +2,15 @@ package com.innov4africa.api_gateway.controller;
 
 import com.innov4africa.api_gateway.model.HistoryItem;
 import com.innov4africa.api_gateway.model.HistoryResponse;
+import com.innov4africa.api_gateway.model.IShopPaymentRequest;
+import com.innov4africa.api_gateway.model.IShopPaymentResponse;
 import com.innov4africa.api_gateway.model.LogoutResponse;
 import com.innov4africa.api_gateway.model.Notification;
 import com.innov4africa.api_gateway.model.NotificationResponse;
 import com.innov4africa.api_gateway.model.SDEPaymentRequest;
 import com.innov4africa.api_gateway.model.SDEPaymentResponse;
+import com.innov4africa.api_gateway.model.SenelecPaymentRequest;
+import com.innov4africa.api_gateway.model.SenelecPaymentResponse;
 import com.innov4africa.api_gateway.model.ServiceStatus;
 import com.innov4africa.api_gateway.model.SmsPayRequest;
 import com.innov4africa.api_gateway.model.SmsPayResponse;
@@ -17,6 +21,8 @@ import com.innov4africa.api_gateway.model.TransferRequest;
 import com.innov4africa.api_gateway.model.TransferResponse;
 import com.innov4africa.api_gateway.model.UO;
 import com.innov4africa.api_gateway.model.UOResponse;
+import com.innov4africa.api_gateway.model.WoyofalPaymentRequest;
+import com.innov4africa.api_gateway.model.WoyofalPaymentResponse;
 import com.innov4africa.api_gateway.service.IPayService;
 import com.innov4africa.api_gateway.service.JwtUtil;
 import org.slf4j.Logger;
@@ -1103,7 +1109,434 @@ public class IPayController {
     }
 
 
-    
+        /**
+     * Endpoint pour effectuer un paiement de facture Senelec
+     * @param authHeader Le header d'autorisation contenant le JWT
+     * @param request La requête contenant les détails du paiement Senelec
+     * @return Une réponse indiquant le succès ou l'échec du paiement
+     */
+    @PostMapping("/senelec-payment")
+    public Mono<ResponseEntity<SenelecPaymentResponse>> paySenelec(
+            @RequestHeader(value = "Authorization", required = false) String authHeader,
+            @RequestBody SenelecPaymentRequest request) {
+        
+        // 1. Vérification de la présence du header Authorization
+        if (authHeader == null || authHeader.isBlank()) {
+            logger.warn("Tentative de paiement Senelec sans header Authorization");
+            return buildUnauthorizedResponse(
+                new SenelecPaymentResponse("error", "Token d'authentification manquant", null,
+                    List.of(new ServiceStatus("i-pay", false, "Non autorisé")))
+            );
+        }
+
+        // 2. Vérification du format Bearer
+        if (!authHeader.startsWith("Bearer ")) {
+            logger.warn("Format de token invalide pour le paiement Senelec: {}", authHeader);
+            return buildUnauthorizedResponse(
+                new SenelecPaymentResponse("error", "Format de token invalide", null,
+                    List.of(new ServiceStatus("i-pay", false, "Non autorisé")))
+            );
+        }
+
+        String jwt = authHeader.substring(7);
+        
+        // 3. Validation du token JWT
+        if (!jwtUtil.validateToken(jwt)) {
+            logger.warn("Token JWT invalide ou expiré pour le paiement Senelec");
+            return buildUnauthorizedResponse(
+                new SenelecPaymentResponse("error", "Token invalide ou expiré", null,
+                    List.of(new ServiceStatus("i-pay", false, "Non autorisé")))
+            );
+        }
+
+        // 4. Extraction des claims nécessaires
+        String telephone = jwtUtil.extractTelephone(jwt);
+        String ipayToken = jwtUtil.extractIpayToken(jwt);
+        
+        if (telephone == null || ipayToken == null) {
+            logger.warn("Token ne contient pas les claims requis - telephone: {}, ipayToken: {}", telephone, ipayToken);
+            return buildUnauthorizedResponse(
+                new SenelecPaymentResponse("error", "Token incomplet", null,
+                    List.of(new ServiceStatus("i-pay", false, "Non autorisé")))
+            );
+        }
+
+        // 5. Validation des données de la requête
+        if (request.getNumeroPolice() == null || request.getNumeroPolice().isBlank() ||
+            request.getNumeroFacture() == null || request.getNumeroFacture().isBlank() ||
+            request.getMontant() == null || request.getMontant().isBlank()) {
+            
+            logger.warn("Données de paiement Senelec incomplètes");
+            return Mono.just(ResponseEntity.badRequest().body(
+                new SenelecPaymentResponse("error", "Données de paiement incomplètes", null,
+                    List.of(new ServiceStatus("i-pay", false, "Données invalides")))
+            ));
+        }
+        
+        try {
+            // Vérification que le montant est un nombre positif
+            double amount = Double.parseDouble(request.getMontant());
+            if (amount <= 0) {
+                return Mono.just(ResponseEntity.badRequest().body(
+                    new SenelecPaymentResponse("error", "Montant invalide", null,
+                        List.of(new ServiceStatus("i-pay", false, "Montant doit être positif")))
+                ));
+            }
+        } catch (NumberFormatException e) {
+            return Mono.just(ResponseEntity.badRequest().body(
+                new SenelecPaymentResponse("error", "Format de montant invalide", null,
+                    List.of(new ServiceStatus("i-pay", false, "Montant doit être un nombre")))
+            ));
+        }
+
+        // 6. Initialisation des valeurs par défaut pour les champs optionnels
+        String commission = request.getCommission() != null ? request.getCommission() : "0";
+        String commagent = request.getCommagent() != null ? request.getCommagent() : "0";
+        String cellular = request.getCellular() != null ? request.getCellular() : telephone;
+        
+        logger.info("Demande de paiement Senelec - Police: {}, Facture: {}, Montant: {}", 
+            request.getNumeroPolice(), request.getNumeroFacture(), request.getMontant());
+        
+        // 7. Appel du service IPay
+        return ipayService.paiementSenelec(
+                ipayToken, 
+                request.getNumeroPolice(), 
+                request.getNumeroFacture(),
+                request.getMontant(), 
+                commission, 
+                cellular, 
+                commagent)
+            .flatMap(xmlResponse -> {
+                try {
+                    Document doc = DocumentBuilderFactory.newInstance()
+                            .newDocumentBuilder()
+                            .parse(new InputSource(new StringReader(xmlResponse)));
+                    
+                    XPath xpath = XPathFactory.newInstance().newXPath();
+                    String error = xpath.evaluate("//return/error", doc);
+                    String message = xpath.evaluate("//return/message", doc);
+                    String reference = xpath.evaluate("//return/reference", doc);
+
+                    if ("0".equals(error)) {
+                        logger.info("Paiement Senelec réussi, référence: {}", reference);
+                        return Mono.just(ResponseEntity.ok(
+                            new SenelecPaymentResponse(
+                                "success", 
+                                message, 
+                                reference,
+                                List.of(new ServiceStatus("i-pay", true, "Paiement effectué"))
+                            )
+                        ));
+                    } else {
+                        logger.warn("Échec du paiement Senelec: {} - {}", error, message);
+                        return Mono.just(ResponseEntity.badRequest().body(
+                            new SenelecPaymentResponse(
+                                "error",
+                                message,
+                                null,
+                                List.of(new ServiceStatus("i-pay", false, message))
+                            )
+                        ));
+                    }
+                } catch (Exception e) {
+                    logger.error("Erreur de traitement de la réponse XML pour le paiement Senelec", e);
+                    return Mono.just(ResponseEntity.internalServerError().body(
+                        new SenelecPaymentResponse(
+                            "error",
+                            "Erreur technique",
+                            null,
+                            List.of(new ServiceStatus("i-pay", false, "Erreur de traitement"))
+                        )
+                    ));
+                }
+            })
+            .onErrorResume(e -> {
+                logger.error("Erreur lors de l'appel au service IPay pour le paiement Senelec", e);
+                return Mono.just(ResponseEntity.internalServerError().body(
+                    new SenelecPaymentResponse(
+                        "error",
+                        "Service indisponible",
+                        null,
+                        List.of(new ServiceStatus("i-pay", false, "Erreur de communication"))
+                    )
+                ));
+            });
+    }
+
+        /**
+     * Endpoint pour effectuer un paiement Woyofal
+     * @param authHeader Le header d'autorisation contenant le JWT
+     * @param request La requête contenant les détails du paiement Woyofal
+     * @return Une réponse indiquant le succès ou l'échec du paiement
+     */
+    @PostMapping("/woyofal-payment")
+    public Mono<ResponseEntity<WoyofalPaymentResponse>> payWoyofal(
+            @RequestHeader(value = "Authorization", required = false) String authHeader,
+            @RequestBody WoyofalPaymentRequest request) {
+        
+        // 1. Vérification de la présence du header Authorization
+        if (authHeader == null || authHeader.isBlank()) {
+            logger.warn("Tentative de paiement Woyofal sans header Authorization");
+            return buildUnauthorizedResponse(
+                new WoyofalPaymentResponse("error", "Token d'authentification manquant", null, null, null,
+                    List.of(new ServiceStatus("i-pay", false, "Non autorisé")))
+            );
+        }
+
+        // 2. Vérification du format Bearer
+        if (!authHeader.startsWith("Bearer ")) {
+            logger.warn("Format de token invalide pour le paiement Woyofal: {}", authHeader);
+            return buildUnauthorizedResponse(
+                new WoyofalPaymentResponse("error", "Format de token invalide", null, null, null,
+                    List.of(new ServiceStatus("i-pay", false, "Non autorisé")))
+            );
+        }
+
+        String jwt = authHeader.substring(7);
+        
+        // 3. Validation du token JWT
+        if (!jwtUtil.validateToken(jwt)) {
+            logger.warn("Token JWT invalide ou expiré pour le paiement Woyofal");
+            return buildUnauthorizedResponse(
+                new WoyofalPaymentResponse("error", "Token invalide ou expiré", null, null, null,
+                    List.of(new ServiceStatus("i-pay", false, "Non autorisé")))
+            );
+        }
+
+        // 4. Extraction des claims nécessaires
+        String telephone = jwtUtil.extractTelephone(jwt);
+        String ipayToken = jwtUtil.extractIpayToken(jwt);
+        
+        if (telephone == null || ipayToken == null) {
+            logger.warn("Token ne contient pas les claims requis - telephone: {}, ipayToken: {}", telephone, ipayToken);
+            return buildUnauthorizedResponse(
+                new WoyofalPaymentResponse("error", "Token incomplet", null, null, null,
+                    List.of(new ServiceStatus("i-pay", false, "Non autorisé")))
+            );
+        }
+
+        // 5. Validation des données de la requête
+        if (request.getNumeroPolice() == null || request.getNumeroPolice().isBlank() ||
+            request.getNumeroTelephone() == null || request.getNumeroTelephone().isBlank() ||
+            request.getMontant() == null || request.getMontant().isBlank()) {
+            
+            logger.warn("Données de paiement Woyofal incomplètes");
+            return Mono.just(ResponseEntity.badRequest().body(
+                new WoyofalPaymentResponse("error", "Données de paiement incomplètes", null, null, null,
+                    List.of(new ServiceStatus("i-pay", false, "Données invalides")))
+            ));
+        }
+        
+        try {
+            // Vérification que le montant est un nombre positif
+            double amount = Double.parseDouble(request.getMontant());
+            if (amount <= 0) {
+                return Mono.just(ResponseEntity.badRequest().body(
+                    new WoyofalPaymentResponse("error", "Montant invalide", null, null, null,
+                        List.of(new ServiceStatus("i-pay", false, "Montant doit être positif")))
+                ));
+            }
+        } catch (NumberFormatException e) {
+            return Mono.just(ResponseEntity.badRequest().body(
+                new WoyofalPaymentResponse("error", "Format de montant invalide", null, null, null,
+                    List.of(new ServiceStatus("i-pay", false, "Montant doit être un nombre")))
+            ));
+        }
+
+        // 6. Initialisation des valeurs par défaut pour les champs optionnels
+        String frais = request.getFrais() != null ? request.getFrais() : "0";
+        String commission = request.getCommission() != null ? request.getCommission() : "0";
+        String cellular = request.getCellular() != null ? request.getCellular() : telephone;
+        
+        logger.info("Demande de paiement Woyofal - Police: {}, Téléphone: {}, Montant: {}", 
+            request.getNumeroPolice(), request.getNumeroTelephone(), request.getMontant());
+        
+        // 7. Appel du service IPay
+        return ipayService.paiementWoyofal(
+                ipayToken, 
+                request.getNumeroPolice(), 
+                request.getNumeroTelephone(), 
+                request.getMontant(),
+                frais,
+                commission, 
+                cellular)
+            .flatMap(xmlResponse -> {
+                try {
+                    Document doc = DocumentBuilderFactory.newInstance()
+                            .newDocumentBuilder()
+                            .parse(new InputSource(new StringReader(xmlResponse)));
+                    
+                    XPath xpath = XPathFactory.newInstance().newXPath();
+                    String error = xpath.evaluate("//return/error", doc);
+                    String message = xpath.evaluate("//return/message", doc);
+                    String reference = xpath.evaluate("//return/reference", doc);
+                    String code = xpath.evaluate("//return/code", doc);
+                    String montantEnergy = xpath.evaluate("//return/montantEnergy", doc);
+
+                    if ("0".equals(error)) {
+                        logger.info("Paiement Woyofal réussi, code: {}, référence: {}", code, reference);
+                        return Mono.just(ResponseEntity.ok(
+                            new WoyofalPaymentResponse(
+                                "success", 
+                                message, 
+                                reference,
+                                code,
+                                montantEnergy,
+                                List.of(new ServiceStatus("i-pay", true, "Rechargement effectué"))
+                            )
+                        ));
+                    } else {
+                        logger.warn("Échec du paiement Woyofal: {} - {}", error, message);
+                        return Mono.just(ResponseEntity.badRequest().body(
+                            new WoyofalPaymentResponse(
+                                "error",
+                                message,
+                                null,
+                                null,
+                                null,
+                                List.of(new ServiceStatus("i-pay", false, message))
+                            )
+                        ));
+                    }
+                } catch (Exception e) {
+                    logger.error("Erreur de traitement de la réponse XML pour le paiement Woyofal", e);
+                    return Mono.just(ResponseEntity.internalServerError().body(
+                        new WoyofalPaymentResponse(
+                            "error",
+                            "Erreur technique",
+                            null,
+                            null,
+                            null,
+                            List.of(new ServiceStatus("i-pay", false, "Erreur de traitement"))
+                        )
+                    ));
+                }
+            })
+            .onErrorResume(e -> {
+                logger.error("Erreur lors de l'appel au service IPay pour le paiement Woyofal", e);
+                return Mono.just(ResponseEntity.internalServerError().body(
+                    new WoyofalPaymentResponse(
+                        "error",
+                        "Service indisponible",
+                        null,
+                        null,
+                        null,
+                        List.of(new ServiceStatus("i-pay", false, "Erreur de communication"))
+                    )
+                ));
+            });
+    }
+
+
+        /**
+     * Endpoint pour effectuer un paiement iShop
+     * @param authHeader Le header d'autorisation contenant le JWT (optionnel)
+     * @param request La requête contenant les détails du paiement iShop
+     * @return Une réponse indiquant le succès ou l'échec du paiement
+     */
+    @PostMapping("/ishop-payment")
+    public Mono<ResponseEntity<IShopPaymentResponse>> payIShop(
+            @RequestHeader(value = "Authorization", required = false) String authHeader,
+            @RequestBody IShopPaymentRequest request) {
+        
+        // Note: Pour iShop, l'authentification est optionnelle
+        // car il s'agit d'un paiement par code qui peut être utilisé par n'importe qui
+        
+        // 1. Validation des données de la requête
+        if (request.getNumeros() == null || request.getNumeros().isBlank() ||
+            request.getMontant() == null || request.getMontant().isBlank() ||
+            request.getOrder() == null || request.getOrder().isBlank() ||
+            request.getCode() == null || request.getCode().isBlank()) {
+            
+            logger.warn("Données de paiement iShop incomplètes");
+            return Mono.just(ResponseEntity.badRequest().body(
+                new IShopPaymentResponse("error", "Données de paiement incomplètes", null,
+                    List.of(new ServiceStatus("i-pay", false, "Données invalides")))
+            ));
+        }
+        
+        try {
+            // Vérification que le montant est un nombre positif
+            double amount = Double.parseDouble(request.getMontant());
+            if (amount <= 0) {
+                return Mono.just(ResponseEntity.badRequest().body(
+                    new IShopPaymentResponse("error", "Montant invalide", null,
+                        List.of(new ServiceStatus("i-pay", false, "Montant doit être positif")))
+                ));
+            }
+        } catch (NumberFormatException e) {
+            return Mono.just(ResponseEntity.badRequest().body(
+                new IShopPaymentResponse("error", "Format de montant invalide", null,
+                    List.of(new ServiceStatus("i-pay", false, "Montant doit être un nombre")))
+            ));
+        }
+        
+        logger.info("Demande de paiement iShop - Commande: {}, Montant: {}", 
+            request.getOrder(), request.getMontant());
+        
+        // 2. Appel du service IPay
+        return ipayService.paymentIshop(
+                request.getNumeros(), 
+                request.getMontant(), 
+                request.getOrder(), 
+                request.getCode())
+            .flatMap(xmlResponse -> {
+                try {
+                    Document doc = DocumentBuilderFactory.newInstance()
+                            .newDocumentBuilder()
+                            .parse(new InputSource(new StringReader(xmlResponse)));
+                    
+                    XPath xpath = XPathFactory.newInstance().newXPath();
+                    String error = xpath.evaluate("//return/error", doc);
+                    String message = xpath.evaluate("//return/message", doc);
+                    String reference = xpath.evaluate("//return/reference", doc);
+
+                    if ("0".equals(error)) {
+                        logger.info("Paiement iShop réussi, référence: {}", reference);
+                        return Mono.just(ResponseEntity.ok(
+                            new IShopPaymentResponse(
+                                "success", 
+                                message, 
+                                reference,
+                                List.of(new ServiceStatus("i-pay", true, "Paiement effectué"))
+                            )
+                        ));
+                    } else {
+                        logger.warn("Échec du paiement iShop: {} - {}", error, message);
+                        return Mono.just(ResponseEntity.badRequest().body(
+                            new IShopPaymentResponse(
+                                "error",
+                                message,
+                                null,
+                                List.of(new ServiceStatus("i-pay", false, message))
+                            )
+                        ));
+                    }
+                } catch (Exception e) {
+                    logger.error("Erreur de traitement de la réponse XML pour le paiement iShop", e);
+                    return Mono.just(ResponseEntity.internalServerError().body(
+                        new IShopPaymentResponse(
+                            "error",
+                            "Erreur technique",
+                            null,
+                            List.of(new ServiceStatus("i-pay", false, "Erreur de traitement"))
+                        )
+                    ));
+                }
+            })
+            .onErrorResume(e -> {
+                logger.error("Erreur lors de l'appel au service IPay pour le paiement iShop", e);
+                return Mono.just(ResponseEntity.internalServerError().body(
+                    new IShopPaymentResponse(
+                        "error",
+                        "Service indisponible",
+                        null,
+                        List.of(new ServiceStatus("i-pay", false, "Erreur de communication"))
+                    )
+                ));
+            });
+    }
+
     private Mono<ResponseEntity<SoldeResponse>> handleSoapResponse(String xmlResponse) {
         try {
             Document doc = DocumentBuilderFactory.newInstance()
