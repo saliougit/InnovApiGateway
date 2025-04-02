@@ -5,6 +5,8 @@ import com.innov4africa.api_gateway.model.HistoryResponse;
 import com.innov4africa.api_gateway.model.LogoutResponse;
 import com.innov4africa.api_gateway.model.Notification;
 import com.innov4africa.api_gateway.model.NotificationResponse;
+import com.innov4africa.api_gateway.model.SDEPaymentRequest;
+import com.innov4africa.api_gateway.model.SDEPaymentResponse;
 import com.innov4africa.api_gateway.model.ServiceStatus;
 import com.innov4africa.api_gateway.model.SmsPayRequest;
 import com.innov4africa.api_gateway.model.SmsPayResponse;
@@ -944,6 +946,164 @@ public class IPayController {
             });
     }
 
+    /**
+ * Endpoint pour effectuer un paiement de facture SDE
+ * @param authHeader Le header d'autorisation contenant le JWT
+ * @param request La requête contenant les détails du paiement SDE
+ * @return Une réponse indiquant le succès ou l'échec du paiement
+ */
+    @PostMapping("/sde-payment")
+    public Mono<ResponseEntity<SDEPaymentResponse>> paySDE(
+            @RequestHeader(value = "Authorization", required = false) String authHeader,
+            @RequestBody SDEPaymentRequest request) {
+        
+        // 1. Vérification de la présence du header Authorization
+        if (authHeader == null || authHeader.isBlank()) {
+            logger.warn("Tentative de paiement SDE sans header Authorization");
+            return buildUnauthorizedResponse(
+                new SDEPaymentResponse("error", "Token d'authentification manquant", null,
+                    List.of(new ServiceStatus("i-pay", false, "Non autorisé")))
+            );
+        }
+
+        // 2. Vérification du format Bearer
+        if (!authHeader.startsWith("Bearer ")) {
+            logger.warn("Format de token invalide pour le paiement SDE: {}", authHeader);
+            return buildUnauthorizedResponse(
+                new SDEPaymentResponse("error", "Format de token invalide", null,
+                    List.of(new ServiceStatus("i-pay", false, "Non autorisé")))
+            );
+        }
+
+        String jwt = authHeader.substring(7);
+        
+        // 3. Validation du token JWT
+        if (!jwtUtil.validateToken(jwt)) {
+            logger.warn("Token JWT invalide ou expiré pour le paiement SDE");
+            return buildUnauthorizedResponse(
+                new SDEPaymentResponse("error", "Token invalide ou expiré", null,
+                    List.of(new ServiceStatus("i-pay", false, "Non autorisé")))
+            );
+        }
+
+        // 4. Extraction des claims nécessaires
+        String telephone = jwtUtil.extractTelephone(jwt);
+        String ipayToken = jwtUtil.extractIpayToken(jwt);
+        
+        if (telephone == null || ipayToken == null) {
+            logger.warn("Token ne contient pas les claims requis - telephone: {}, ipayToken: {}", telephone, ipayToken);
+            return buildUnauthorizedResponse(
+                new SDEPaymentResponse("error", "Token incomplet", null,
+                    List.of(new ServiceStatus("i-pay", false, "Non autorisé")))
+            );
+        }
+
+        // 5. Validation des données de la requête
+        if (request.getNumeroPolice() == null || request.getNumeroPolice().isBlank() ||
+            request.getNumeroFacture() == null || request.getNumeroFacture().isBlank() ||
+            request.getReferenceClient() == null || request.getReferenceClient().isBlank() ||
+            request.getMontant() == null || request.getMontant().isBlank()) {
+            
+            logger.warn("Données de paiement SDE incomplètes");
+            return Mono.just(ResponseEntity.badRequest().body(
+                new SDEPaymentResponse("error", "Données de paiement incomplètes", null,
+                    List.of(new ServiceStatus("i-pay", false, "Données invalides")))
+            ));
+        }
+        
+        try {
+            // Vérification que le montant est un nombre positif
+            double amount = Double.parseDouble(request.getMontant());
+            if (amount <= 0) {
+                return Mono.just(ResponseEntity.badRequest().body(
+                    new SDEPaymentResponse("error", "Montant invalide", null,
+                        List.of(new ServiceStatus("i-pay", false, "Montant doit être positif")))
+                ));
+            }
+        } catch (NumberFormatException e) {
+            return Mono.just(ResponseEntity.badRequest().body(
+                new SDEPaymentResponse("error", "Format de montant invalide", null,
+                    List.of(new ServiceStatus("i-pay", false, "Montant doit être un nombre")))
+            ));
+        }
+
+        // 6. Initialisation des valeurs par défaut pour les champs optionnels
+        String commission = request.getCommission() != null ? request.getCommission() : "0";
+        String commagent = request.getCommagent() != null ? request.getCommagent() : "0";
+        String cellular = request.getCellular() != null ? request.getCellular() : telephone;
+        
+        logger.info("Demande de paiement SDE - Police: {}, Facture: {}, Référence: {}, Montant: {}", 
+            request.getNumeroPolice(), request.getNumeroFacture(), request.getReferenceClient(), request.getMontant());
+        
+        // 7. Appel du service IPay
+        return ipayService.paiementSDE(
+                ipayToken, 
+                request.getNumeroPolice(), 
+                request.getNumeroFacture(), 
+                request.getReferenceClient(),
+                request.getMontant(), 
+                commission, 
+                cellular, 
+                commagent)
+            .flatMap(xmlResponse -> {
+                try {
+                    Document doc = DocumentBuilderFactory.newInstance()
+                            .newDocumentBuilder()
+                            .parse(new InputSource(new StringReader(xmlResponse)));
+                    
+                    XPath xpath = XPathFactory.newInstance().newXPath();
+                    String error = xpath.evaluate("//return/error", doc);
+                    String message = xpath.evaluate("//return/message", doc);
+                    String reference = xpath.evaluate("//return/reference", doc);
+
+                    if ("0".equals(error)) {
+                        logger.info("Paiement SDE réussi, référence: {}", reference);
+                        return Mono.just(ResponseEntity.ok(
+                            new SDEPaymentResponse(
+                                "success", 
+                                message, 
+                                reference, 
+                                List.of(new ServiceStatus("i-pay", true, "Paiement effectué"))
+                            )
+                        ));
+                    } else {
+                        logger.warn("Échec du paiement SDE: {} - {}", error, message);
+                        return Mono.just(ResponseEntity.badRequest().body(
+                            new SDEPaymentResponse(
+                                "error",
+                                message,
+                                null,
+                                List.of(new ServiceStatus("i-pay", false, message))
+                            )
+                        ));
+                    }
+                } catch (Exception e) {
+                    logger.error("Erreur de traitement de la réponse XML pour le paiement SDE", e);
+                    return Mono.just(ResponseEntity.internalServerError().body(
+                        new SDEPaymentResponse(
+                            "error",
+                            "Erreur technique",
+                            null,
+                            List.of(new ServiceStatus("i-pay", false, "Erreur de traitement"))
+                        )
+                    ));
+                }
+            })
+            .onErrorResume(e -> {
+                logger.error("Erreur lors de l'appel au service IPay pour le paiement SDE", e);
+                return Mono.just(ResponseEntity.internalServerError().body(
+                    new SDEPaymentResponse(
+                        "error",
+                        "Service indisponible",
+                        null,
+                        List.of(new ServiceStatus("i-pay", false, "Erreur de communication"))
+                    )
+                ));
+            });
+    }
+
+
+    
     private Mono<ResponseEntity<SoldeResponse>> handleSoapResponse(String xmlResponse) {
         try {
             Document doc = DocumentBuilderFactory.newInstance()

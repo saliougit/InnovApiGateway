@@ -451,6 +451,76 @@ public class IPayService {
         }).subscribeOn(Schedulers.boundedElastic());
     }
     
+    /**
+     * Effectue un paiement de facture SDE
+     * @param sessionId Le token de session IPay
+     * @param numeroPolice Le numéro de police d'abonnement
+     * @param numeroFacture Le numéro de facture
+     * @param referenceClient La référence client
+     * @param montant Le montant à payer
+     * @param commission La commission
+     * @param cellular Le numéro de téléphone du client
+     * @param commagent La commission de l'agent
+     * @return Une réponse SOAP contenant le résultat du paiement
+     */
+    public Mono<String> paiementSDE(
+            String sessionId, 
+            String numeroPolice, 
+            String numeroFacture, 
+            String referenceClient,
+            String montant, 
+            String commission, 
+            String cellular, 
+            String commagent) {
+        
+        return Mono.fromCallable(() -> {
+            try {
+                logger.info("Tentative de paiement SDE pour la référence: {}, police: {}, facture: {}, montant: {}", 
+                    referenceClient, numeroPolice, numeroFacture, montant);
+
+                String soapRequest = """
+                    <soapenv:Envelope 
+                        xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/" 
+                        xmlns:run="http://runtime.services.cash.innov.sn/">
+                       <soapenv:Header/>
+                       <soapenv:Body>
+                          <run:paiementSDE>
+                             <idSession>%s</idSession>
+                             <numeroPolice>%s</numeroPolice>
+                             <numeroFacture>%s</numeroFacture>
+                             <referenceClient>%s</referenceClient>
+                             <montant>%s</montant>
+                             <commission>%s</commission>
+                             <cellular>%s</cellular>
+                             <commagent>%s</commagent>
+                          </run:paiementSDE>
+                       </soapenv:Body>
+                    </soapenv:Envelope>
+                    """.formatted(sessionId, numeroPolice, numeroFacture, referenceClient, 
+                        montant, commission, cellular, commagent);
+
+                logger.debug("Requête SOAP pour le paiement SDE:\n{}", soapRequest);
+
+                String response = webClient.post()
+                        .uri(SOAP_ENDPOINT)
+                        .contentType(MediaType.TEXT_XML)
+                        .header("Authorization", "Bearer " + sessionId)
+                        .accept(MediaType.TEXT_XML)
+                        .bodyValue(soapRequest)
+                        .retrieve()
+                        .bodyToMono(String.class)
+                        .block();
+
+                logger.debug("Réponse SOAP pour le paiement SDE:\n{}", response);
+                return response;
+
+            } catch (Exception e) {
+                logger.error("Erreur lors du paiement SDE", e);
+                throw new RuntimeException("Erreur technique lors du paiement SDE: " + e.getMessage());
+            }
+        }).subscribeOn(Schedulers.boundedElastic());
+    }
+    
     private AuthResult parseResponse(String soapResponse) {
         try {
             DocumentBuilderFactory factory = DocumentBuilderFactory.newInstance();
