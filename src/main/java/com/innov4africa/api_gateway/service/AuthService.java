@@ -5,6 +5,7 @@ import com.innov4africa.api_gateway.model.AuthResponse;
 import com.innov4africa.api_gateway.model.LogoutResponse;
 import com.innov4africa.api_gateway.model.ServiceStatus;
 import com.innov4africa.api_gateway.repository.TokenRepository;
+import com.innov4africa.api_gateway.repository.UserSessionRepository;
 
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
@@ -35,6 +36,10 @@ public class AuthService {
     
     @Autowired(required = false)
     private TokenRepository tokenRepository;
+    
+    @Autowired
+    private UserSessionRepository userSessionRepository;
+
 
     public Mono<AuthResponse> authenticate(AuthRequest request) {
         String email = request.getEmail();
@@ -43,18 +48,51 @@ public class AuthService {
         return ipayService.authenticate(email, password)
             .map(authResult -> {
                 if (authResult.isSuccess()) {
-
                     // Afficher le token IPay dans les logs
                     logger.info("Token IPay reçu: {}", authResult.getToken());
-                    logger.info("Téléphone IPay: {}", authResult.getTelephone());
-                    logger.info("User ID: {}", authResult.getIduser());
+                    
+                    String ipayToken = authResult.getToken();
+                    String telephone = authResult.getTelephone();
+                    String userId = authResult.getIduser();
+                    
+                    // Vérifier si c'est un cas de "session déjà en cours" (error=13)
+                    if (authResult.getMessage() != null && 
+                        authResult.getMessage().contains("session en cours")) {
+                        
+                        logger.info("Session déjà en cours détectée pour: {}", email);
+                        
+                        // Si le téléphone ou l'userId est manquant, essayer de les récupérer du repository
+                        if ((telephone == null || userId == null) && userSessionRepository.hasSessionInfo(ipayToken)) {
+                            UserSessionRepository.UserSessionInfo sessionInfo = userSessionRepository.getUserSessionInfo(ipayToken);
+                            
+                            if (sessionInfo != null) {
+                                if (telephone == null) {
+                                    telephone = sessionInfo.getTelephone();
+                                    logger.info("Téléphone récupéré du repository: {}", telephone);
+                                }
+                                
+                                if (userId == null) {
+                                    userId = sessionInfo.getUserId();
+                                    logger.info("UserId récupéré du repository: {}", userId);
+                                }
+                            }
+                        }
+                    }
+                    
+                    // Si nous avons récupéré les informations complètes, les sauvegarder dans le repository
+                    if (ipayToken != null && (userId != null || telephone != null)) {
+                        userSessionRepository.saveUserSession(ipayToken, userId, telephone);
+                    }
+                    
+                    logger.info("Téléphone IPay: {}", telephone);
+                    logger.info("User ID: {}", userId);
                     
                     // Génère le JWT avec toutes les infos IPay
                     String jwtToken = jwtUtil.generateIpayToken(
                         email,
-                        authResult.getToken(), // token IPay
-                        authResult.getTelephone(),
-                        authResult.getIduser()
+                        ipayToken,
+                        telephone,
+                        userId
                     );
                     
                     return new AuthResponse(
@@ -81,6 +119,52 @@ public class AuthService {
                 )
             ));
     }
+
+    // // public Mono<AuthResponse> authenticate(AuthRequest request) {
+    //     String email = request.getEmail();
+    //     String password = request.getPassword();
+    
+    //     return ipayService.authenticate(email, password)
+    //         .map(authResult -> {
+    //             if (authResult.isSuccess()) {
+
+    //                 // Afficher le token IPay dans les logs
+    //                 logger.info("Token IPay reçu: {}", authResult.getToken());
+    //                 logger.info("Téléphone IPay: {}", authResult.getTelephone());
+    //                 logger.info("User ID: {}", authResult.getIduser());
+                    
+    //                 // Génère le JWT avec toutes les infos IPay
+    //                 String jwtToken = jwtUtil.generateIpayToken(
+    //                     email,
+    //                     authResult.getToken(), // token IPay
+    //                     authResult.getTelephone(),
+    //                     authResult.getIduser()
+    //                 );
+                    
+    //                 return new AuthResponse(
+    //                     "success",
+    //                     authResult.getMessage(),
+    //                     jwtToken,
+    //                     List.of(new ServiceStatus("i-pay", true, authResult.getMessage()))
+    //                 );
+    //             } else {
+    //                 return new AuthResponse(
+    //                     "error",
+    //                     authResult.getMessage(),
+    //                     null,
+    //                     List.of(new ServiceStatus("i-pay", false, authResult.getMessage()))
+    //                 );
+    //             }
+    //         })
+    //         .onErrorResume(e -> Mono.just(
+    //             new AuthResponse(
+    //                 "error",
+    //                 "Erreur technique: " + e.getMessage(),
+    //                 null,
+    //                 List.of(new ServiceStatus("i-pay", false, "Erreur technique"))
+    //             )
+    //         ));
+    // }
     
     /**
      * Méthode de déconnexion globale qui gère la déconnexion de tous les services intégrés
