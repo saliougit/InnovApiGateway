@@ -2,6 +2,7 @@ package com.innov4africa.api_gateway.service;
 
 import com.innov4africa.api_gateway.model.AuthRequest;
 import com.innov4africa.api_gateway.model.AuthResponse;
+import com.innov4africa.api_gateway.model.AuthResult;
 import com.innov4africa.api_gateway.model.LogoutResponse;
 import com.innov4africa.api_gateway.model.ServiceStatus;
 import com.innov4africa.api_gateway.repository.TokenRepository;
@@ -41,84 +42,85 @@ public class AuthService {
     private UserSessionRepository userSessionRepository;
 
 
-    public Mono<AuthResponse> authenticate(AuthRequest request) {
-        String email = request.getEmail();
-        String password = request.getPassword();
+    // public Mono<AuthResponse> authenticate(AuthRequest request) {
+    //     String email = request.getEmail();
+    //     String password = request.getPassword();
     
-        return ipayService.authenticate(email, password)
-            .map(authResult -> {
-                if (authResult.isSuccess()) {
-                    // Afficher le token IPay dans les logs
-                    logger.info("Token IPay reçu: {}", authResult.getToken());
+    //     return ipayService.authenticate(email, password)
+    //         .map(authResult -> {
+    //             if (authResult.isSuccess()) {
+    //                 // Afficher le token IPay dans les logs
+    //                 logger.info("Token IPay reçu: {}", authResult.getToken());
                     
-                    String ipayToken = authResult.getToken();
-                    String telephone = authResult.getTelephone();
-                    String userId = authResult.getIduser();
+    //                 String ipayToken = authResult.getToken();
+    //                 String telephone = authResult.getTelephone();
+    //                 String userId = authResult.getIduser();
                     
-                    // Vérifier si c'est un cas de "session déjà en cours" (error=13)
-                    if (authResult.getMessage() != null && 
-                        authResult.getMessage().contains("session en cours")) {
+    //                 // Vérifier si c'est un cas de "session déjà en cours" (error=13)
+    //                 if (authResult.getMessage() != null && 
+    //                     authResult.getMessage().contains("session en cours")) {
                         
-                        logger.info("Session déjà en cours détectée pour: {}", email);
+    //                     logger.info("Session déjà en cours détectée pour: {}", email);
                         
-                        // Si le téléphone ou l'userId est manquant, essayer de les récupérer du repository
-                        if ((telephone == null || userId == null) && userSessionRepository.hasSessionInfo(ipayToken)) {
-                            UserSessionRepository.UserSessionInfo sessionInfo = userSessionRepository.getUserSessionInfo(ipayToken);
+    //                     // Si le téléphone ou l'userId est manquant, essayer de les récupérer du repository
+    //                     if ((telephone == null || userId == null) && userSessionRepository.hasSessionInfo(ipayToken)) {
+    //                         UserSessionRepository.UserSessionInfo sessionInfo = userSessionRepository.getUserSessionInfo(ipayToken);
                             
-                            if (sessionInfo != null) {
-                                if (telephone == null) {
-                                    telephone = sessionInfo.getTelephone();
-                                    logger.info("Téléphone récupéré du repository: {}", telephone);
-                                }
+    //                         if (sessionInfo != null) {
+    //                             if (telephone == null) {
+    //                                 telephone = sessionInfo.getTelephone();
+    //                                 logger.info("Téléphone récupéré du repository: {}", telephone);
+    //                             }
                                 
-                                if (userId == null) {
-                                    userId = sessionInfo.getUserId();
-                                    logger.info("UserId récupéré du repository: {}", userId);
-                                }
-                            }
-                        }
-                    }
+    //                             if (userId == null) {
+    //                                 userId = sessionInfo.getUserId();
+    //                                 logger.info("UserId récupéré du repository: {}", userId);
+    //                             }
+    //                         }
+    //                     }
+    //                 }
                     
-                    // Si nous avons récupéré les informations complètes, les sauvegarder dans le repository
-                    if (ipayToken != null && (userId != null || telephone != null)) {
-                        userSessionRepository.saveUserSession(ipayToken, userId, telephone);
-                    }
+    //                 // Si nous avons récupéré les informations complètes, les sauvegarder dans le repository
+    //                 if (ipayToken != null && (userId != null || telephone != null)) {
+    //                     userSessionRepository.saveUserSession(ipayToken, userId, telephone);
+    //                 }
                     
-                    logger.info("Téléphone IPay: {}", telephone);
-                    logger.info("User ID: {}", userId);
+    //                 logger.info("Téléphone IPay: {}", telephone);
+    //                 logger.info("User ID: {}", userId);
                     
-                    // Génère le JWT avec toutes les infos IPay
-                    String jwtToken = jwtUtil.generateIpayToken(
-                        email,
-                        ipayToken,
-                        telephone,
-                        userId
-                    );
+    //                 // Génère le JWT avec toutes les infos IPay
+    //                 String jwtToken = jwtUtil.generateIpayToken(
+    //                     email,
+    //                     ipayToken,
+    //                     telephone,
+    //                     userId
+    //                 );
                     
-                    return new AuthResponse(
-                        "success",
-                        authResult.getMessage(),
-                        jwtToken,
-                        List.of(new ServiceStatus("i-pay", true, authResult.getMessage()))
-                    );
-                } else {
-                    return new AuthResponse(
-                        "error",
-                        authResult.getMessage(),
-                        null,
-                        List.of(new ServiceStatus("i-pay", false, authResult.getMessage()))
-                    );
-                }
-            })
-            .onErrorResume(e -> Mono.just(
-                new AuthResponse(
-                    "error",
-                    "Erreur technique: " + e.getMessage(),
-                    null,
-                    List.of(new ServiceStatus("i-pay", false, "Erreur technique"))
-                )
-            ));
-    }
+    //                 return new AuthResponse(
+    //                     "success",
+    //                     authResult.getMessage(),
+    //                     jwtToken,
+    //                     List.of(new ServiceStatus("i-pay", true, authResult.getMessage()))
+    //                 );
+    //             } else {
+    //                 return new AuthResponse(
+    //                     "error",
+    //                     authResult.getMessage(),
+    //                     null,
+    //                     List.of(new ServiceStatus("i-pay", false, authResult.getMessage()))
+    //                 );
+    //             }
+    //         })
+    //         .onErrorResume(e -> Mono.just(
+    //             new AuthResponse(
+    //                 "error",
+    //                 "Erreur technique: " + e.getMessage(),
+    //                 null,
+    //                 List.of(new ServiceStatus("i-pay", false, "Erreur technique"))
+    //             )
+    //         ));
+    // }
+    
 
     // // public Mono<AuthResponse> authenticate(AuthRequest request) {
     //     String email = request.getEmail();
@@ -243,4 +245,118 @@ public class AuthService {
             return Mono.just(new LogoutResponse("error", "Token incomplet", serviceStatuses));
         }
     }
+
+
+    // Dans AuthService.java - Remplacer la méthode authenticate
+
+public Mono<AuthResponse> authenticate(AuthRequest request) {
+    String email = request.getEmail();
+    String password = request.getPassword();
+
+    return ipayService.authenticate(email, password)
+        .flatMap(authResult -> {
+            if (authResult.isSuccess()) {
+                // Traitement normal pour une authentification réussie
+                logger.info("Authentification réussie pour: {}", email);
+                logger.info("Token IPay reçu: {}", authResult.getToken());
+                
+                String ipayToken = authResult.getToken();
+                String telephone = authResult.getTelephone();
+                String userId = authResult.getIduser();
+                
+                // Si nous avons récupéré les informations complètes, les sauvegarder dans le repository
+                if (ipayToken != null && (userId != null || telephone != null)) {
+                    userSessionRepository.saveUserSession(ipayToken, userId, telephone);
+                }
+                
+                logger.info("Téléphone IPay: {}", telephone);
+                logger.info("User ID: {}", userId);
+                
+                return Mono.just(buildSuccessResponse(authResult, email));
+                
+            } else if (authResult.getMessage() != null && 
+                     authResult.getMessage().contains("session en cours") && 
+                     authResult.getToken() != null) {
+                
+                logger.info("Session déjà en cours détectée pour: {}, déconnexion et reconnexion...", email);
+                
+                // Récupérer le token de la session en cours
+                String existingToken = authResult.getToken();
+                
+                // Déconnexion puis reconnexion
+                return ipayService.deconnexionUser(existingToken)
+                    .flatMap(deconnectResponse -> {
+                        try {
+                            Document doc = DocumentBuilderFactory.newInstance()
+                                    .newDocumentBuilder()
+                                    .parse(new InputSource(new StringReader(deconnectResponse)));
+                            
+                            XPath xpath = XPathFactory.newInstance().newXPath();
+                            String code = xpath.evaluate("//return/code", doc);
+                            
+                            if ("1".equals(code)) {
+                                logger.info("Déconnexion réussie, reconnexion en cours pour: {}", email);
+                                // Reconnexion avec les mêmes identifiants
+                                return ipayService.authenticate(email, password);
+                            } else {
+                                logger.warn("Échec de la déconnexion pour: {}, tentative de reconnexion quand même", email);
+                                return ipayService.authenticate(email, password);
+                            }
+                        } catch (Exception e) {
+                            logger.error("Erreur lors du traitement de la réponse de déconnexion", e);
+                            // Tenter la reconnexion même en cas d'erreur de traitement
+                            return ipayService.authenticate(email, password);
+                        }
+                    })
+                    .map(newAuthResult -> {
+                        if (newAuthResult.isSuccess()) {
+                            logger.info("Reconnexion réussie pour: {}", email);
+                            return buildSuccessResponse(newAuthResult, email);
+                        } else {
+                            logger.warn("Échec de la reconnexion pour: {}: {}", email, newAuthResult.getMessage());
+                            return buildErrorResponse(newAuthResult.getMessage());
+                        }
+                    })
+                    .onErrorResume(e -> {
+                        logger.error("Erreur technique lors de la déconnexion/reconnexion pour: {}", email, e);
+                        return Mono.just(buildErrorResponse("Erreur technique lors de la déconnexion/reconnexion: " + e.getMessage()));
+                    });
+            } else {
+                // Autre type d'erreur
+                logger.warn("Erreur d'authentification pour: {}: {}", email, authResult.getMessage());
+                return Mono.just(buildErrorResponse(authResult.getMessage()));
+            }
+        })
+        .onErrorResume(e -> {
+            logger.error("Erreur technique lors de l'authentification pour: {}", email, e);
+            return Mono.just(buildErrorResponse("Erreur technique: " + e.getMessage()));
+        });
+}
+
+// Ajouter ces méthodes utilitaires si elles n'existent pas déjà
+
+private AuthResponse buildSuccessResponse(AuthResult authResult, String email) {
+    String jwtToken = jwtUtil.generateIpayToken(
+        email,
+        authResult.getToken(),
+        authResult.getTelephone(),
+        authResult.getIduser()
+    );
+    
+    return new AuthResponse(
+        "success",
+        authResult.getMessage(),
+        jwtToken,
+        List.of(new ServiceStatus("i-pay", true, authResult.getMessage()))
+    );
+}
+
+private AuthResponse buildErrorResponse(String message) {
+    return new AuthResponse(
+        "error",
+        message,
+        null,
+        List.of(new ServiceStatus("i-pay", false, message))
+    );
+}
 }

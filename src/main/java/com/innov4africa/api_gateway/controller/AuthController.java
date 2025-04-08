@@ -76,4 +76,24 @@ public class AuthController {
                 }
             });
     }
+
+    
+    /**
+     * Endpoint pour reconnection automatique en cas de session déjà en cours
+     * @param request Les identifiants pour se reconnecter
+     * @return Une réponse d'authentification avec un nouveau token
+     */
+    @PostMapping("/reconnect")
+    public Mono<ResponseEntity<AuthResponse>> reconnect(@RequestBody AuthRequest request) {
+        logger.info("Demande de reconnexion reçue pour: {}", request.getEmail());
+        
+        return authService.authenticate(request)
+            .map(response -> {
+                if ("success".equals(response.getStatus())) {
+                    return ResponseEntity.ok(response);
+                } else {
+                    return ResponseEntity.status(401).body(response);
+                }
+            });
+    }
 }

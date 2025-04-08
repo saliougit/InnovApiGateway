@@ -6,19 +6,35 @@ package com.innov4africa.api_gateway.model;
 public class Transaction {
     private String date;
     private String montant;
-    private String type;
-    private String description;
-    private String reference;
+    private String typeOperation; // DEBIT/CREDIT
+    private String typeTransaction; // Type spécifique (VIREMENT_ISWITCH, etc.)
+    private String idTransaction; // ID unique de la transaction
+    private String soldeCompte; // Solde du compte après la transaction
+    private String source; // Pour distinguer entre ipay et ibanking
     
     public Transaction() {
     }
     
+    public Transaction(String date, String montant, String typeOperation, String typeTransaction, 
+                      String idTransaction, String soldeCompte, String source) {
+        this.date = date;
+        this.montant = montant;
+        this.typeOperation = typeOperation;
+        this.typeTransaction = typeTransaction;
+        this.idTransaction = idTransaction;
+        this.soldeCompte = soldeCompte;
+        this.source = source;
+    }
+
+    // Constructeur de compatibilité pour l'ancien format
     public Transaction(String date, String montant, String type, String description, String reference) {
         this.date = date;
         this.montant = montant;
-        this.type = type;
-        this.description = description;
-        this.reference = reference;
+        this.typeOperation = type;
+        this.typeTransaction = description;
+        this.idTransaction = reference;
+        this.soldeCompte = "";
+        this.source = "legacy";
     }
 
     public String getDate() {
@@ -37,27 +53,68 @@ public class Transaction {
         this.montant = montant;
     }
 
+    public String getTypeOperation() {
+        return typeOperation;
+    }
+
+    public void setTypeOperation(String typeOperation) {
+        this.typeOperation = typeOperation;
+    }
+    
+    public String getTypeTransaction() {
+        return typeTransaction;
+    }
+
+    public void setTypeTransaction(String typeTransaction) {
+        this.typeTransaction = typeTransaction;
+    }
+
+    public String getIdTransaction() {
+        return idTransaction;
+    }
+
+    public void setIdTransaction(String idTransaction) {
+        this.idTransaction = idTransaction;
+    }
+
+    public String getSoldeCompte() {
+        return soldeCompte;
+    }
+
+    public void setSoldeCompte(String soldeCompte) {
+        this.soldeCompte = soldeCompte;
+    }
+    
+    public String getSource() {
+        return source;
+    }
+
+    public void setSource(String source) {
+        this.source = source;
+    }
+    
+    // Pour la compatibilité avec l'ancien format
     public String getType() {
-        return type;
+        return typeOperation;
     }
 
     public void setType(String type) {
-        this.type = type;
+        this.typeOperation = type;
     }
 
     public String getDescription() {
-        return description;
+        return typeTransaction;
     }
 
     public void setDescription(String description) {
-        this.description = description;
+        this.typeTransaction = description;
     }
 
     public String getReference() {
-        return reference;
+        return idTransaction;
     }
 
     public void setReference(String reference) {
-        this.reference = reference;
+        this.idTransaction = reference;
     }
 }

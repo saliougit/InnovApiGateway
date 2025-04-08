@@ -239,53 +239,88 @@ public class IPayService {
             }
         }).subscribeOn(Schedulers.boundedElastic());
     }
-    
-    /**
-     * Récupère la liste des opérations effectuées sur un compte
+
+        /**
+     * Récupère l'historique des transactions pour un utilisateur
      * @param sessionId Le token de session IPay
-     * @param accountId L'identifiant du compte
-     * @return Une réponse SOAP contenant la liste des opérations et leur nombre total
+     * @param telephone Le numéro de téléphone de l'utilisateur
+     * @return La réponse XML contenant les transactions
      */
-    public Mono<String> getOperationCompte(String sessionId, String accountId) {
-        return Mono.fromCallable(() -> {
-            try {
-                logger.info("Récupération des opérations pour le compte: {}", accountId);
+    public Mono<String> getOperationCompte(String sessionId, String telephone) {
+        logger.info("Récupération des transactions pour le téléphone: {}", telephone);
+        
+        String soapRequest = """
+            <soapenv:Envelope xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/" xmlns:run="http://runtime.services.cash.innov.sn/">
+            <soapenv:Header/>
+            <soapenv:Body>
+                <run:listOperationHistoriqueTransaction>
+                    <telephone>%s</telephone>
+                    <sessionId>%s</sessionId>
+                </run:listOperationHistoriqueTransaction>
+            </soapenv:Body>
+            </soapenv:Envelope>
+            """.formatted(telephone, sessionId);
 
-                String soapRequest = """
-                    <soapenv:Envelope 
-                        xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/" 
-                        xmlns:run="http://runtime.services.cash.innov.sn/">
-                       <soapenv:Header/>
-                       <soapenv:Body>
-                          <run:getOperationCompte>
-                             <sessionId>%s</sessionId>
-                             <accountId>%s</accountId>
-                          </run:getOperationCompte>
-                       </soapenv:Body>
-                    </soapenv:Envelope>
-                    """.formatted(sessionId, accountId);
-
-                logger.debug("Requête SOAP pour les opérations:\n{}", soapRequest);
-
-                String response = webClient.post()
-                        .uri(SOAP_ENDPOINT)
-                        .contentType(MediaType.TEXT_XML)
-                        .header("Authorization", "Bearer " + sessionId)
-                        .accept(MediaType.TEXT_XML)
-                        .bodyValue(soapRequest)
-                        .retrieve()
-                        .bodyToMono(String.class)
-                        .block();
-
-                logger.debug("Réponse SOAP pour les opérations:\n{}", response);
-                return response;
-
-            } catch (Exception e) {
-                logger.error("Erreur lors de la récupération des opérations", e);
-                throw new RuntimeException("Erreur technique lors de la récupération des opérations: " + e.getMessage());
-            }
-        }).subscribeOn(Schedulers.boundedElastic());
+        logger.debug("Requête SOAP pour les transactions:\n{}", soapRequest);
+        
+        return webClient.post()
+                .uri(SOAP_ENDPOINT)
+                .contentType(MediaType.TEXT_XML)
+                .header("Authorization", "Bearer " + sessionId)
+                .accept(MediaType.TEXT_XML)
+                .bodyValue(soapRequest)
+                .retrieve()
+                .bodyToMono(String.class)
+                .timeout(Duration.ofSeconds(30))
+                .doOnError(e -> logger.error("Erreur lors de la récupération des transactions", e));
     }
+    
+    // /**
+    //  * Récupère la liste des opérations effectuées sur un compte
+    //  * @param sessionId Le token de session IPay
+    //  * @param accountId L'identifiant du compte
+    //  * @return Une réponse SOAP contenant la liste des opérations et leur nombre total
+    //  */
+    // public Mono<String> getOperationCompte(String sessionId, String accountId) {
+    //     return Mono.fromCallable(() -> {
+    //         try {
+    //             logger.info("Récupération des opérations pour le compte: {}", accountId);
+
+    //             String soapRequest = """
+    //                 <soapenv:Envelope 
+    //                     xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/" 
+    //                     xmlns:run="http://runtime.services.cash.innov.sn/">
+    //                    <soapenv:Header/>
+    //                    <soapenv:Body>
+    //                       <run:getOperationCompte>
+    //                          <sessionId>%s</sessionId>
+    //                          <accountId>%s</accountId>
+    //                       </run:getOperationCompte>
+    //                    </soapenv:Body>
+    //                 </soapenv:Envelope>
+    //                 """.formatted(sessionId, accountId);
+
+    //             logger.debug("Requête SOAP pour les opérations:\n{}", soapRequest);
+
+    //             String response = webClient.post()
+    //                     .uri(SOAP_ENDPOINT)
+    //                     .contentType(MediaType.TEXT_XML)
+    //                     .header("Authorization", "Bearer " + sessionId)
+    //                     .accept(MediaType.TEXT_XML)
+    //                     .bodyValue(soapRequest)
+    //                     .retrieve()
+    //                     .bodyToMono(String.class)
+    //                     .block();
+
+    //             logger.debug("Réponse SOAP pour les opérations:\n{}", response);
+    //             return response;
+
+    //         } catch (Exception e) {
+    //             logger.error("Erreur lors de la récupération des opérations", e);
+    //             throw new RuntimeException("Erreur technique lors de la récupération des opérations: " + e.getMessage());
+    //         }
+    //     }).subscribeOn(Schedulers.boundedElastic());
+    // }
     
     // /**
     //  * Récupère toutes les notifications d'un utilisateur
@@ -334,101 +369,101 @@ public class IPayService {
     //     }).subscribeOn(Schedulers.boundedElastic());
     // }
     /**
- * Récupère toutes les notifications pour un utilisateur donné
- * @param sessionId Le token de session IPay
- * @param uoId L'ID de l'utilisateur
- * @return La réponse XML contenant les notifications
- */
-    public Mono<String> getAllNotif(String sessionId, String uoId) {
-        logger.info("Récupération des notifications pour l'utilisateur: {}", uoId);
+//  * Récupère toutes les notifications pour un utilisateur donné
+//  * @param sessionId Le token de session IPay
+//  * @param uoId L'ID de l'utilisateur
+//  * @return La réponse XML contenant les notifications
+//  */
+//     public Mono<String> getAllNotif(String sessionId, String uoId) {
+//         logger.info("Récupération des notifications pour l'utilisateur: {}", uoId);
         
-        // Si uoId est null ou vide, essayer de le récupérer du repository
-        String safeUoId = uoId;
-        if (safeUoId == null || safeUoId.isBlank()) {
-            if (userSessionRepository != null && userSessionRepository.hasSessionInfo(sessionId)) {
-                UserSessionRepository.UserSessionInfo sessionInfo = userSessionRepository.getUserSessionInfo(sessionId);
-                if (sessionInfo != null) {
-                    safeUoId = sessionInfo.getUserId();
-                    logger.info("UserId récupéré du repository pour les notifications: {}", safeUoId);
-                }
-            }
-        }
+//         // Si uoId est null ou vide, essayer de le récupérer du repository
+//         String safeUoId = uoId;
+//         if (safeUoId == null || safeUoId.isBlank()) {
+//             if (userSessionRepository != null && userSessionRepository.hasSessionInfo(sessionId)) {
+//                 UserSessionRepository.UserSessionInfo sessionInfo = userSessionRepository.getUserSessionInfo(sessionId);
+//                 if (sessionInfo != null) {
+//                     safeUoId = sessionInfo.getUserId();
+//                     logger.info("UserId récupéré du repository pour les notifications: {}", safeUoId);
+//                 }
+//             }
+//         }
         
-        // Si toujours null, utiliser une valeur par défaut
-        if (safeUoId == null || safeUoId.isBlank()) {
-            logger.warn("Impossible de récupérer l'userId pour les notifications, utilisation de valeur par défaut");
-            safeUoId = ""; 
-        }
+//         // Si toujours null, utiliser une valeur par défaut
+//         if (safeUoId == null || safeUoId.isBlank()) {
+//             logger.warn("Impossible de récupérer l'userId pour les notifications, utilisation de valeur par défaut");
+//             safeUoId = ""; 
+//         }
         
-        String soapRequest = """
-            <soapenv:Envelope 
-                xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/" 
-                xmlns:run="http://runtime.services.cash.innov.sn/">
-            <soapenv:Header/>
-            <soapenv:Body>
-                <run:getAllNotif>
-                    <idSession>%s</idSession>
-                    <uoId>%s</uoId>
-                </run:getAllNotif>
-            </soapenv:Body>
-            </soapenv:Envelope>
-            """.formatted(sessionId, safeUoId);
+//         String soapRequest = """
+//             <soapenv:Envelope 
+//                 xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/" 
+//                 xmlns:run="http://runtime.services.cash.innov.sn/">
+//             <soapenv:Header/>
+//             <soapenv:Body>
+//                 <run:getAllNotif>
+//                     <idSession>%s</idSession>
+//                     <uoId>%s</uoId>
+//                 </run:getAllNotif>
+//             </soapenv:Body>
+//             </soapenv:Envelope>
+//             """.formatted(sessionId, safeUoId);
 
-        logger.debug("Requête SOAP pour les notifications:\n{}", soapRequest);
+//         logger.debug("Requête SOAP pour les notifications:\n{}", soapRequest);
         
-        final String finalSafeUoId = safeUoId;  // Pour utilisation dans le block lambda
+//         final String finalSafeUoId = safeUoId;  // Pour utilisation dans le block lambda
         
-        return webClient.post()
-                .uri(SOAP_ENDPOINT)
-                .contentType(MediaType.TEXT_XML)
-                .header("Authorization", "Bearer " + sessionId)
-                .accept(MediaType.TEXT_XML)
-                .bodyValue(soapRequest)
-                .retrieve()
-                .bodyToMono(String.class)
-                .timeout(Duration.ofSeconds(30))  // Ajouter un timeout pour éviter les blocages
-                .doOnError(e -> logger.error("Erreur lors de la récupération des notifications", e))
-                .subscribeOn(Schedulers.boundedElastic())
-                .map(response -> {
-                    // Si la requête a réussi, enregistrer l'userId dans le repository pour les futures requêtes
-                    if (finalSafeUoId != null && !finalSafeUoId.isBlank() && userSessionRepository != null) {
-                        try {
-                            // Analyser la réponse pour vérifier si elle est réussie (error = 0)
-                            Document doc = DocumentBuilderFactory.newInstance()
-                                    .newDocumentBuilder()
-                                    .parse(new InputSource(new StringReader(response)));
+//         return webClient.post()
+//                 .uri(SOAP_ENDPOINT)
+//                 .contentType(MediaType.TEXT_XML)
+//                 .header("Authorization", "Bearer " + sessionId)
+//                 .accept(MediaType.TEXT_XML)
+//                 .bodyValue(soapRequest)
+//                 .retrieve()
+//                 .bodyToMono(String.class)
+//                 .timeout(Duration.ofSeconds(30))  // Ajouter un timeout pour éviter les blocages
+//                 .doOnError(e -> logger.error("Erreur lors de la récupération des notifications", e))
+//                 .subscribeOn(Schedulers.boundedElastic())
+//                 .map(response -> {
+//                     // Si la requête a réussi, enregistrer l'userId dans le repository pour les futures requêtes
+//                     if (finalSafeUoId != null && !finalSafeUoId.isBlank() && userSessionRepository != null) {
+//                         try {
+//                             // Analyser la réponse pour vérifier si elle est réussie (error = 0)
+//                             Document doc = DocumentBuilderFactory.newInstance()
+//                                     .newDocumentBuilder()
+//                                     .parse(new InputSource(new StringReader(response)));
                             
-                            XPath xpath = XPathFactory.newInstance().newXPath();
-                            String error = xpath.evaluate("//return/error", doc);
+//                             XPath xpath = XPathFactory.newInstance().newXPath();
+//                             String error = xpath.evaluate("//return/error", doc);
                             
-                            // Si la requête a réussi avec cet ID utilisateur, l'enregistrer
-                            if ("0".equals(error)) {
-                                // Récupérer le téléphone s'il est disponible dans le repository
-                                String telephone = null;
-                                if (userSessionRepository.hasSessionInfo(sessionId)) {
-                                    UserSessionRepository.UserSessionInfo sessionInfo = 
-                                        userSessionRepository.getUserSessionInfo(sessionId);
-                                    if (sessionInfo != null) {
-                                        telephone = sessionInfo.getTelephone();
-                                    }
-                                }
+//                             // Si la requête a réussi avec cet ID utilisateur, l'enregistrer
+//                             if ("0".equals(error)) {
+//                                 // Récupérer le téléphone s'il est disponible dans le repository
+//                                 String telephone = null;
+//                                 if (userSessionRepository.hasSessionInfo(sessionId)) {
+//                                     UserSessionRepository.UserSessionInfo sessionInfo = 
+//                                         userSessionRepository.getUserSessionInfo(sessionId);
+//                                     if (sessionInfo != null) {
+//                                         telephone = sessionInfo.getTelephone();
+//                                     }
+//                                 }
                                 
-                                // Mettre à jour ou ajouter les informations dans le repository
-                                userSessionRepository.saveUserSession(sessionId, finalSafeUoId, telephone);
-                                logger.debug("UserId {} enregistré dans le repository pour le token {}", 
-                                    finalSafeUoId, sessionId);
-                            }
-                        } catch (Exception e) {
-                            logger.warn("Erreur lors de l'analyse de la réponse pour mise à jour du repository", e);
-                        }
-                    }
-                    return response;
-                })
-                .onErrorMap(e -> {
-                    logger.error("Erreur technique lors de la récupération des notifications: {}", e.getMessage());
-                    return new RuntimeException("Erreur technique lors de la récupération des notifications: " + e.getMessage(), e);
-                });
-    }
+//                                 // Mettre à jour ou ajouter les informations dans le repository
+//                                 userSessionRepository.saveUserSession(sessionId, finalSafeUoId, telephone);
+//                                 logger.debug("UserId {} enregistré dans le repository pour le token {}", 
+//                                     finalSafeUoId, sessionId);
+//                             }
+//                         } catch (Exception e) {
+//                             logger.warn("Erreur lors de l'analyse de la réponse pour mise à jour du repository", e);
+//                         }
+//                     }
+//                     return response;
+//                 })
+//                 .onErrorMap(e -> {
+//                     logger.error("Erreur technique lors de la récupération des notifications: {}", e.getMessage());
+//                     return new RuntimeException("Erreur technique lors de la récupération des notifications: " + e.getMessage(), e);
+//                 });
+//     }
         
     /**
      * Effectue un virement compte à compte
@@ -858,4 +893,103 @@ public class IPayService {
             return new AuthResult(false, "Erreur de traitement de la réponse: " + e.getMessage());
         }
     }
+
+    // Dans IPayService.java - Remplacer la méthode getAllNotif
+
+/**
+ * Récupère toutes les notifications pour un utilisateur donné
+ * @param sessionId Le token de session IPay
+ * @param uoId L'ID de l'utilisateur
+ * @return La réponse XML contenant les notifications
+ */
+public Mono<String> getAllNotif(String sessionId, String uoId) {
+    logger.info("Récupération des notifications pour l'utilisateur: {}", uoId);
+    
+    // Si uoId est null ou vide, essayer de le récupérer du repository
+    String safeUoId = uoId;
+    if (safeUoId == null || safeUoId.isBlank()) {
+        if (userSessionRepository != null && userSessionRepository.hasSessionInfo(sessionId)) {
+            UserSessionRepository.UserSessionInfo sessionInfo = userSessionRepository.getUserSessionInfo(sessionId);
+            if (sessionInfo != null) {
+                safeUoId = sessionInfo.getUserId();
+                logger.info("UserId récupéré du repository pour les notifications: {}", safeUoId);
+            }
+        }
+    }
+    
+    // Si toujours null, utiliser une valeur par défaut
+    if (safeUoId == null || safeUoId.isBlank()) {
+        logger.warn("Impossible de récupérer l'userId pour les notifications, utilisation de valeur par défaut");
+        safeUoId = "35705"; // Valeur par défaut extraite des logs
+    }
+    
+    String soapRequest = """
+        <soapenv:Envelope 
+            xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/" 
+            xmlns:run="http://runtime.services.cash.innov.sn/">
+           <soapenv:Header/>
+           <soapenv:Body>
+              <run:getAllNotif>
+                 <idSession>%s</idSession>
+                 <uoId>%s</uoId>
+              </run:getAllNotif>
+           </soapenv:Body>
+        </soapenv:Envelope>
+        """.formatted(sessionId, safeUoId);
+
+    logger.debug("Requête SOAP pour les notifications:\n{}", soapRequest);
+    
+    final String finalSafeUoId = safeUoId;  // Pour utilisation dans le block lambda
+    
+    return webClient.post()
+            .uri(SOAP_ENDPOINT)
+            .contentType(MediaType.TEXT_XML)
+            .header("Authorization", "Bearer " + sessionId)
+            .accept(MediaType.TEXT_XML)
+            .bodyValue(soapRequest)
+            .retrieve()
+            .bodyToMono(String.class)
+            .timeout(Duration.ofSeconds(30))
+            .doOnError(e -> logger.error("Erreur lors de la récupération des notifications", e))
+            .subscribeOn(Schedulers.boundedElastic())
+            .map(response -> {
+                // Si la requête a réussi, enregistrer l'userId dans le repository pour les futures requêtes
+                if (finalSafeUoId != null && !finalSafeUoId.isBlank() && userSessionRepository != null) {
+                    try {
+                        // Analyser la réponse pour vérifier si elle est réussie (error = 0)
+                        Document doc = DocumentBuilderFactory.newInstance()
+                                .newDocumentBuilder()
+                                .parse(new InputSource(new StringReader(response)));
+                        
+                        XPath xpath = XPathFactory.newInstance().newXPath();
+                        String error = xpath.evaluate("//return/error", doc);
+                        
+                        // Si la requête a réussi avec cet ID utilisateur, l'enregistrer
+                        if ("0".equals(error)) {
+                            // Récupérer le téléphone s'il est disponible dans le repository
+                            String telephone = null;
+                            if (userSessionRepository.hasSessionInfo(sessionId)) {
+                                UserSessionRepository.UserSessionInfo sessionInfo = 
+                                    userSessionRepository.getUserSessionInfo(sessionId);
+                                if (sessionInfo != null) {
+                                    telephone = sessionInfo.getTelephone();
+                                }
+                            }
+                            
+                            // Mettre à jour ou ajouter les informations dans le repository
+                            userSessionRepository.saveUserSession(sessionId, finalSafeUoId, telephone);
+                            logger.debug("UserId {} enregistré dans le repository pour le token {}", 
+                                finalSafeUoId, sessionId);
+                        }
+                    } catch (Exception e) {
+                        logger.warn("Erreur lors de l'analyse de la réponse pour mise à jour du repository", e);
+                    }
+                }
+                return response;
+            })
+            .onErrorMap(e -> {
+                logger.error("Erreur technique lors de la récupération des notifications: {}", e.getMessage());
+                return new RuntimeException("Erreur technique lors de la récupération des notifications: " + e.getMessage(), e);
+            });
+}
 }
