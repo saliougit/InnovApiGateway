@@ -91,6 +91,8 @@ public class WaveController {
                         null,
                         null,
                         null,
+                        null,
+                        null,
                         List.of(new ServiceStatus("wave", false, "Erreur technique"))
                     )
                 ));
@@ -161,6 +163,8 @@ public class WaveController {
                         null,
                         null,
                         null,
+                        null,
+                        null,
                         List.of(new ServiceStatus("wave", false, "Erreur technique"))
                     )
                 ));
@@ -211,7 +215,15 @@ public class WaveController {
         }
         
         if (isSuccess) {
-            String qrCodeUrl = (String) response.get("qrCodeUrl");
+            // Récupération du QR code image (encodé en base64)
+            String qrCodeImage = response.get("qrCode") != null ? (String) response.get("qrCode") : null;
+            
+            // Récupération de l'URL du QR code ou du service de paiement
+            String qrCodeUrl = response.get("qrCodeUrl") != null ? (String) response.get("qrCodeUrl") : null;
+            
+            // Récupération de l'URL Wave Pay (si disponible)
+            String wavePayUrl = (String) response.get("url");
+            
             String requestId = response.get("requestId") != null ? response.get("requestId").toString() : null;
             String transactionId = response.get("transactionId") != null ? 
                                    response.get("transactionId").toString() : 
@@ -223,6 +235,8 @@ public class WaveController {
                     "success",
                     userMessage,
                     qrCodeUrl,
+                    wavePayUrl,
+                    qrCodeImage,
                     transactionId,
                     requestId,
                     List.of(new ServiceStatus("wave", true, userMessage))
@@ -233,6 +247,8 @@ public class WaveController {
                 new WaveOperationResponse(
                     "error",
                     userMessage,
+                    null,
+                    null,
                     null,
                     null,
                     null,

@@ -9,6 +9,8 @@ public class WaveOperationResponse {
     private String status;            // "success" ou "error"
     private String message;           // Message descriptif
     private String qrCodeUrl;         // URL de l'image QR code à scanner
+    private String wavePayUrl;        // URL de paiement Wave
+    private String qrCodeImage;       // Image QR code encodée en base64
     private String transactionId;     // Identifiant de la transaction
     private String requestId;         // Identifiant de la requête
     private List<ServiceStatus> services;  // Statut des services
@@ -17,11 +19,14 @@ public class WaveOperationResponse {
     public WaveOperationResponse() {
     }
     
-    public WaveOperationResponse(String status, String message, String qrCodeUrl, String transactionId, 
-                                String requestId, List<ServiceStatus> services) {
+    public WaveOperationResponse(String status, String message, String qrCodeUrl, String wavePayUrl,
+                                String qrCodeImage, String transactionId, String requestId, 
+                                List<ServiceStatus> services) {
         this.status = status;
         this.message = message;
         this.qrCodeUrl = qrCodeUrl;
+        this.wavePayUrl = wavePayUrl;
+        this.qrCodeImage = qrCodeImage;
         this.transactionId = transactionId;
         this.requestId = requestId;
         this.services = services;
@@ -57,6 +62,22 @@ public class WaveOperationResponse {
     
     public void setQrCodeUrl(String qrCodeUrl) {
         this.qrCodeUrl = qrCodeUrl;
+    }
+    
+    public String getWavePayUrl() {
+        return wavePayUrl;
+    }
+    
+    public void setWavePayUrl(String wavePayUrl) {
+        this.wavePayUrl = wavePayUrl;
+    }
+    
+    public String getQrCodeImage() {
+        return qrCodeImage;
+    }
+    
+    public void setQrCodeImage(String qrCodeImage) {
+        this.qrCodeImage = qrCodeImage;
     }
     
     public String getTransactionId() {
