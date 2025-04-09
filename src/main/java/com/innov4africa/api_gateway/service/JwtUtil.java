@@ -36,12 +36,36 @@ public class JwtUtil {
         return createToken(claims, username);
     }
     
+    // Génère un token JWT avec toutes les informations IPay y compris l'ID du compte
+    public String generateIpayTokenWithAccount(String username, String ipayToken, String telephone, 
+                                          String userId, String accountIdIPay) {
+        Map<String, Object> claims = new HashMap<>();
+        claims.put("ipayToken", ipayToken);
+        claims.put("telephone", telephone);
+        claims.put("userId", userId);
+        claims.put("accountIdIPay", accountIdIPay);
+        return createToken(claims, username);
+    }
+    
     // Version améliorée avec nom et prénom pour les besoins du SMS Pay
     public String generateIpayTokenWithUserInfo(String username, String ipayToken, String telephone, String userId, String nom, String prenom) {
         Map<String, Object> claims = new HashMap<>();
         claims.put("ipayToken", ipayToken);
         claims.put("telephone", telephone);
         claims.put("userId", userId);
+        claims.put("nom", nom);
+        claims.put("prenom", prenom);
+        return createToken(claims, username);
+    }
+
+    // Version complète avec toutes les informations
+    public String generateCompleteIpayToken(String username, String ipayToken, String telephone, String userId, 
+                                         String accountIdIPay, String nom, String prenom) {
+        Map<String, Object> claims = new HashMap<>();
+        claims.put("ipayToken", ipayToken);
+        claims.put("telephone", telephone);
+        claims.put("userId", userId);
+        claims.put("accountIdIPay", accountIdIPay);
         claims.put("nom", nom);
         claims.put("prenom", prenom);
         return createToken(claims, username);
@@ -85,6 +109,11 @@ public class JwtUtil {
 
     public String extractUserId(String token) {
         return extractClaim(token, claims -> claims.get("userId", String.class));
+    }
+    
+    // Méthode pour extraire l'ID du compte IPay du token JWT
+    public String extractAccountIdIPay(String token) {
+        return extractClaim(token, claims -> claims.get("accountIdIPay", String.class));
     }
     
     // Nouvelles méthodes pour extraire le nom et le prénom du token JWT

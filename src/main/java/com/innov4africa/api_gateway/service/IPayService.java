@@ -992,4 +992,85 @@ public Mono<String> getAllNotif(String sessionId, String uoId) {
                 return new RuntimeException("Erreur technique lors de la récupération des notifications: " + e.getMessage(), e);
             });
 }
+
+    /**
+     * Récupère la liste des comptes d'un utilisateur
+     * @param sessionId Token IPay de la session
+     * @param cellulaire Numéro de téléphone de l'utilisateur
+     * @return Réponse XML contenant la liste des comptes
+     */
+    public Mono<String> getAllListAccount(String sessionId, String cellulaire) {
+        logger.info("Récupération de la liste des comptes pour le téléphone: {}", cellulaire);
+        
+        String xmlRequest = "<soapenv:Envelope xmlns:soapenv=\"http://schemas.xmlsoap.org/soap/envelope/\" xmlns:run=\"http://runtime.services.cash.innov.sn/\">\n" +
+                "   <soapenv:Header/>\n" +
+                "   <soapenv:Body>\n" +
+                "      <run:getAllListAccount>\n" +
+                "         <sessionId>" + sessionId + "</sessionId>\n" +
+                "         <cellulaire>" + cellulaire + "</cellulaire>\n" +
+                "      </run:getAllListAccount>\n" +
+                "   </soapenv:Body>\n" +
+                "</soapenv:Envelope>";
+
+        return callIPayService(xmlRequest);
+    }
+
+    /**
+     * Extrait l'ID du compte à partir de la réponse XML de getAllListAccount
+     * @param xmlResponse La réponse XML de l'appel à getAllListAccount
+     * @return L'ID du compte principal ou null si non trouvé
+     */
+    public String extractAccountIdFromResponse(String xmlResponse) {
+        try {
+            Document doc = DocumentBuilderFactory.newInstance()
+                    .newDocumentBuilder()
+                    .parse(new InputSource(new StringReader(xmlResponse)));
+            
+            XPath xpath = XPathFactory.newInstance().newXPath();
+            String error = xpath.evaluate("//return/error", doc);
+            
+            if ("0".equals(error)) {
+                // Récupérer l'ID du premier compte (généralement le compte principal)
+                String accountId = xpath.evaluate("//return/accounts/id", doc);
+                logger.info("ID du compte récupéré: {}", accountId);
+                return accountId;
+            } else {
+                String message = xpath.evaluate("//return/message", doc);
+                logger.warn("Erreur lors de la récupération des comptes: {}", message);
+                return null;
+            }
+        } catch (Exception e) {
+            logger.error("Erreur lors du traitement de la réponse XML pour la liste des comptes", e);
+            return null;
+        }
+    }
+
+    /**
+     * Méthode générique pour appeler un service SOAP d'IPay
+     * @param xmlRequest La requête XML SOAP à envoyer
+     * @return La réponse XML du service
+     */
+    public Mono<String> callIPayService(String xmlRequest) {
+        return Mono.fromCallable(() -> {
+            try {
+                logger.debug("Requête SOAP:\n{}", xmlRequest);
+
+                String response = webClient.post()
+                        .uri(SOAP_ENDPOINT)
+                        .contentType(MediaType.TEXT_XML)
+                        .accept(MediaType.TEXT_XML)
+                        .bodyValue(xmlRequest)
+                        .retrieve()
+                        .bodyToMono(String.class)
+                        .block();
+
+                logger.debug("Réponse SOAP:\n{}", response);
+                return response;
+
+            } catch (Exception e) {
+                logger.error("Erreur lors de l'appel au service IPay", e);
+                throw new RuntimeException("Erreur technique lors de l'appel au service IPay: " + e.getMessage());
+            }
+        }).subscribeOn(Schedulers.boundedElastic());
+    }
 }

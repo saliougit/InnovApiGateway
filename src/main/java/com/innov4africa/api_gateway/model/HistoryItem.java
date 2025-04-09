@@ -2,16 +2,16 @@ package com.innov4africa.api_gateway.model;
 
 public class HistoryItem {
     private String date;
-    private String montant;
-    private String operation;
+    private String id;
+    private String solde;
 
     // Constructeurs
     public HistoryItem() {}
 
-    public HistoryItem(String date, String montant, String operation) {
+    public HistoryItem(String date, String id, String solde) {
         this.date = date;
-        this.montant = montant;
-        this.operation = operation;
+        this.id = id;
+        this.solde = solde;
     }
 
     // Getters et Setters
@@ -23,28 +23,45 @@ public class HistoryItem {
         this.date = date;
     }
 
-    public String getMontant() {
-        return montant;
+    public String getId() {
+        return id;
     }
 
-    public void setMontant(String montant) {
-        this.montant = montant;
+    public void setId(String id) {
+        this.id = id;
     }
 
-    public String getOperation() {
-        return operation;
+    public String getSolde() {
+        return solde;
     }
 
-    public void setOperation(String operation) {
-        this.operation = operation;
+    public void setSolde(String solde) {
+        this.solde = solde;
     }
 
     @Override
     public String toString() {
         return "HistoryItem{" +
                 "date='" + date + '\'' +
-                ", montant='" + montant + '\'' +
-                ", operation='" + operation + '\'' +
+                ", id='" + id + '\'' +
+                ", solde='" + solde + '\'' +
                 '}';
+    }
+    
+    // Pour maintenir la compatibilité avec le code existant
+    public String getMontant() {
+        return solde;
+    }
+    
+    public void setMontant(String montant) {
+        this.solde = montant;
+    }
+    
+    public String getOperation() {
+        return "SOLDE";
+    }
+    
+    public void setOperation(String operation) {
+        // Cette méthode est conservée pour la compatibilité mais n'est pas utilisée avec le nouveau format
     }
 }

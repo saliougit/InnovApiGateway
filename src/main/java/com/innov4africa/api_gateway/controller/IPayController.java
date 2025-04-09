@@ -42,7 +42,9 @@ import javax.xml.xpath.XPathConstants;
 import javax.xml.xpath.XPathFactory;
 import java.io.StringReader;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 
 @RestController
 @RequestMapping("/ipay")
@@ -55,6 +57,26 @@ public class IPayController {
     
     @Autowired
     private JwtUtil jwtUtil;
+
+    /**
+     * Endpoint de diagnostic pour afficher les informations extraites du JWT
+     * @param authHeader Le header d'autorisation contenant le JWT
+     * @return Les informations du token pour débogage
+     */
+    @GetMapping("/token-info")
+    public Mono<ResponseEntity<Map<String, String>>> getTokenInfo(
+            @RequestHeader(value = "Authorization", required = false) String authHeader) {
+        
+        Map<String, String> authInfo = extractAuthInfo(authHeader);
+        if (authInfo == null) {
+            Map<String, String> errorInfo = new HashMap<>();
+            errorInfo.put("error", "Token invalide ou non fourni");
+            return Mono.just(ResponseEntity.status(HttpStatus.UNAUTHORIZED).body(errorInfo));
+        }
+        
+        logger.info("Informations extraites du JWT: {}", authInfo);
+        return Mono.just(ResponseEntity.ok(authInfo));
+    }
 
     @GetMapping("/solde")
     public Mono<ResponseEntity<SoldeResponse>> getSolde(@RequestHeader(value = "Authorization", required = false) String authHeader) {
@@ -231,15 +253,18 @@ public class IPayController {
         }
 
         String ipayToken = jwtUtil.extractIpayToken(jwt);
-        String userId = jwtUtil.extractUserId(jwt);
+        String accountIdIPay = jwtUtil.extractAccountIdIPay(jwt);
         
-        if (ipayToken == null || userId == null) {
+        if (ipayToken == null || accountIdIPay == null) {
+            logger.warn("Token ne contient pas les informations requises - ipayToken: {}, accountIdIPay: {}", ipayToken, accountIdIPay);
             return buildUnauthorizedResponse(
                 new HistoryResponse("error", "Token incomplet", null,
                     List.of(new ServiceStatus("i-pay", false, "Non autorisé"))));
         }
+        
+        logger.info("Demande d'historique du solde pour le compte: {}", accountIdIPay);
 
-        return ipayService.getHistorySolde(ipayToken, userId)
+        return ipayService.getHistorySolde(ipayToken, accountIdIPay)
             .flatMap(xmlResponse -> {
                 try {
                     Document doc = DocumentBuilderFactory.newInstance()
@@ -248,49 +273,57 @@ public class IPayController {
                     
                     XPath xpath = XPathFactory.newInstance().newXPath();
                     String error = xpath.evaluate("//return/error", doc);
-                    String message = xpath.evaluate("//return/message", doc);
 
                     if ("0".equals(error)) {
                         List<HistoryItem> historyItems = new ArrayList<>();
                         
-                        // Si le message indique "Aucune opération"
-                        if ("Aucune opération".equals(message)) {
+                        // Récupérer tous les nœuds 'histories' dans la réponse
+                        NodeList historiesNodes = (NodeList) xpath.evaluate(
+                            "//return/histories", doc, XPathConstants.NODESET);
+                        
+                        logger.info("Nombre d'entrées d'historique: {}", historiesNodes.getLength());
+                        
+                        // Parcourir chaque nœud 'histories' et extraire les données
+                        for (int i = 0; i < historiesNodes.getLength(); i++) {
+                            org.w3c.dom.Node node = historiesNodes.item(i);
+                            
+                            String date = xpath.evaluate("date", node);
+                            String id = xpath.evaluate("id", node);
+                            String solde = xpath.evaluate("solde", node);
+                            
+                            historyItems.add(new HistoryItem(date, id, solde));
+                        }
+                        
+                        // Si aucun historique n'a été trouvé
+                        if (historyItems.isEmpty()) {
                             return Mono.just(ResponseEntity.ok(
-                                new HistoryResponse("success", message, historyItems,
-                                    List.of(new ServiceStatus("i-pay", true, message)))
+                                new HistoryResponse("success", "Aucune opération", historyItems,
+                                    List.of(new ServiceStatus("i-pay", true, "Historique vide")))
                             ));
                         }
                         
-                        // Sinon, traitement normal de l'historique
-                        // (à adapter selon la structure exacte de la réponse)
-                        // NodeList items = (NodeList) xpath.evaluate("//return/history/item", doc, XPathConstants.NODESET);
-                        // for(int i = 0; i < items.getLength(); i++) {
-                        //     Node item = items.item(i);
-                        //     historyItems.add(new HistoryItem(
-                        //         xpath.evaluate("date", item),
-                        //         xpath.evaluate("montant", item),
-                        //         xpath.evaluate("operation", item)
-                        //     ));
-                        // }
-                        
                         return Mono.just(ResponseEntity.ok(
-                            new HistoryResponse("success", message, historyItems,
+                            new HistoryResponse("success", "Historique récupéré", historyItems,
                                 List.of(new ServiceStatus("i-pay", true, "Historique récupéré")))
                         ));
                     } else {
+                        String message = xpath.evaluate("//return/message", doc);
+                        logger.warn("Erreur lors de la récupération de l'historique: {}", message);
                         return Mono.just(ResponseEntity.badRequest().body(
                             new HistoryResponse("error", message, null,
                                 List.of(new ServiceStatus("i-pay", false, message)))
                         ));
                     }
                 } catch (Exception e) {
+                    logger.error("Erreur de traitement de la réponse XML pour l'historique", e);
                     return Mono.just(ResponseEntity.internalServerError().body(
-                        new HistoryResponse("error", "Erreur technique", null,
+                        new HistoryResponse("error", "Erreur technique: " + e.getMessage(), null,
                             List.of(new ServiceStatus("i-pay", false, "Erreur de traitement")))
                     ));
                 }
             })
             .onErrorResume(e -> {
+                logger.error("Erreur lors de l'appel au service IPay pour l'historique", e);
                 return Mono.just(ResponseEntity.internalServerError().body(
                     new HistoryResponse("error", "Service indisponible", null,
                         List.of(new ServiceStatus("i-pay", false, "Erreur de communication")))
@@ -389,145 +422,6 @@ public class IPayController {
             });
     }
 
-    // /**
-    //  * Endpoint pour récupérer les transactions d'un compte
-    //  * @param authHeader Le header d'autorisation contenant le JWT
-    //  * @return Une réponse contenant la liste des transactions et leur nombre total
-    //  */
-    // @GetMapping("/operations")
-    // public Mono<ResponseEntity<TransactionResponse>> getOperations(@RequestHeader(value = "Authorization", required = false) String authHeader) {
-    //     // 1. Vérification de la présence du header Authorization
-    //     if (authHeader == null || authHeader.isBlank()) {
-    //         logger.warn("Tentative d'accès aux opérations sans header Authorization");
-    //         return buildUnauthorizedResponse(
-    //             new TransactionResponse("error", "Token d'authentification manquant", 0, null,
-    //                 List.of(new ServiceStatus("i-pay", false, "Non autorisé")))
-    //         );
-    //     }
-
-    //     // 2. Vérification du format Bearer
-    //     if (!authHeader.startsWith("Bearer ")) {
-    //         logger.warn("Format de token invalide pour les opérations: {}", authHeader);
-    //         return buildUnauthorizedResponse(
-    //             new TransactionResponse("error", "Format de token invalide", 0, null,
-    //                 List.of(new ServiceStatus("i-pay", false, "Non autorisé")))
-    //         );
-    //     }
-
-    //     String jwt = authHeader.substring(7);
-        
-    //     // 3. Validation du token JWT
-    //     if (!jwtUtil.validateToken(jwt)) {
-    //         logger.warn("Token JWT invalide ou expiré pour les opérations");
-    //         return buildUnauthorizedResponse(
-    //             new TransactionResponse("error", "Token invalide ou expiré", 0, null,
-    //                 List.of(new ServiceStatus("i-pay", false, "Non autorisé")))
-    //         );
-    //     }
-
-    //     // 4. Extraction des claims
-    //     // String userId = jwtUtil.extractUserId(jwt);
-    //     String userId = "100";
-    //     String ipayToken = jwtUtil.extractIpayToken(jwt);
-        
-    //     if (userId == null || ipayToken == null) {
-    //         logger.warn("Token ne contient pas les claims requis - userId: {}, ipayToken: {}", userId, ipayToken);
-    //         return buildUnauthorizedResponse(
-    //             new TransactionResponse("error", "Token incomplet", 0, null,
-    //                 List.of(new ServiceStatus("i-pay", false, "Non autorisé")))
-    //         );
-    //     }
-
-    //     logger.info("Demande des opérations pour l'utilisateur ID: {}", userId);
-        
-    //     // 5. Appel du service IPay
-    //     return ipayService.getOperationCompte(ipayToken, userId)
-    //         .flatMap(xmlResponse -> {
-    //             try {
-    //                 Document doc = DocumentBuilderFactory.newInstance()
-    //                         .newDocumentBuilder()
-    //                         .parse(new InputSource(new StringReader(xmlResponse)));
-                    
-    //                 XPath xpath = XPathFactory.newInstance().newXPath();
-    //                 String error = xpath.evaluate("//return/error", doc);
-    //                 String message = xpath.evaluate("//return/message", doc);
-    //                 String totalStr = xpath.evaluate("//return/total", doc);
-                    
-    //                 Integer total = totalStr != null && !totalStr.isEmpty() ? Integer.parseInt(totalStr) : 0;
-
-    //                 if ("0".equals(error)) {
-    //                     List<Transaction> transactions = new ArrayList<>();
-                        
-    //                     // Si des opérations existent dans la réponse (dans le cas où total > 0)
-    //                     if (total > 0) {
-    //                         try {
-    //                             NodeList operations = (NodeList) xpath.evaluate("//return/operations/item", doc, XPathConstants.NODESET);
-    //                             for (int i = 0; i < operations.getLength(); i++) {
-    //                                 String date = xpath.evaluate("date", operations.item(i));
-    //                                 String montant = xpath.evaluate("montant", operations.item(i));
-    //                                 String type = xpath.evaluate("type", operations.item(i));
-    //                                 String description = xpath.evaluate("description", operations.item(i));
-    //                                 String reference = xpath.evaluate("reference", operations.item(i));
-                                    
-    //                                 transactions.add(new Transaction(date, montant, type, description, reference));
-    //                             }
-    //                         } catch (Exception e) {
-    //                             logger.warn("Erreur lors du parsing des opérations: {}", e.getMessage());
-    //                         }
-    //                     }
-                        
-    //                     return Mono.just(ResponseEntity.ok(
-    //                         new TransactionResponse(
-    //                             "success", 
-    //                             message, 
-    //                             total, 
-    //                             transactions, 
-    //                             List.of(new ServiceStatus("i-pay", true, "Opérations récupérées"))
-    //                         )
-    //                     ));
-    //                 } else {
-    //                     logger.warn("Erreur IPay lors de la récupération des opérations: {}", message);
-    //                     return Mono.just(ResponseEntity.badRequest().body(
-    //                         new TransactionResponse(
-    //                             "error",
-    //                             message,
-    //                             0,
-    //                             null,
-    //                             List.of(new ServiceStatus("i-pay", false, message))
-    //                         )
-    //                     ));
-    //                 }
-    //             } catch (Exception e) {
-    //                 logger.error("Erreur de traitement de la réponse XML pour les opérations", e);
-    //                 return Mono.just(ResponseEntity.internalServerError().body(
-    //                     new TransactionResponse(
-    //                         "error",
-    //                         "Erreur technique",
-    //                         0,
-    //                         null,
-    //                         List.of(new ServiceStatus("i-pay", false, "Erreur de traitement"))
-    //                     )
-    //                 ));
-    //             }
-    //         })
-    //         .onErrorResume(e -> {
-    //             logger.error("Erreur lors de l'appel au service IPay pour les opérations", e);
-    //             return Mono.just(ResponseEntity.internalServerError().body(
-    //                 new TransactionResponse(
-    //                     "error",
-    //                     "Service indisponible",
-    //                     0,
-    //                     null,
-    //                     List.of(new ServiceStatus("i-pay", false, "Erreur de communication"))
-    //                 )
-    //             ));
-    //         });
-    // }
-        /**
-     * Endpoint pour récupérer les transactions d'un compte
-     * @param authHeader Le header d'autorisation contenant le JWT
-     * @return Une réponse contenant la liste des transactions et leur nombre total
-     */
     @GetMapping("/operations")
     public Mono<ResponseEntity<TransactionResponse>> getOperations(@RequestHeader(value = "Authorization", required = false) String authHeader) {
         // 1. Vérification de la présence du header Authorization
@@ -788,440 +682,45 @@ public class IPayController {
                 ));
             });
     }
-    // @GetMapping("/notifications")
-    // public Mono<ResponseEntity<NotificationResponse>> getNotifications(@RequestHeader(value = "Authorization", required = false) String authHeader) {
-    //     // 1. Vérification de la présence du header Authorization
-    //     if (authHeader == null || authHeader.isBlank()) {
-    //         logger.warn("Tentative d'accès aux notifications sans header Authorization");
-    //         return buildUnauthorizedResponse(
-    //             new NotificationResponse("error", "Token d'authentification manquant", null,
-    //                 List.of(new ServiceStatus("i-pay", false, "Non autorisé")))
-    //         );
-    //     }
 
-    //     // 2. Vérification du format Bearer
-    //     if (!authHeader.startsWith("Bearer ")) {
-    //         logger.warn("Format de token invalide pour les notifications: {}", authHeader);
-    //         return buildUnauthorizedResponse(
-    //             new NotificationResponse("error", "Format de token invalide", null,
-    //                 List.of(new ServiceStatus("i-pay", false, "Non autorisé")))
-    //         );
-    //     }
-
-    //     String jwt = authHeader.substring(7);
-        
-    //     // 3. Validation du token JWT
-    //     if (!jwtUtil.validateToken(jwt)) {
-    //         logger.warn("Token JWT invalide ou expiré pour les notifications");
-    //         return buildUnauthorizedResponse(
-    //             new NotificationResponse("error", "Token invalide ou expiré", null,
-    //                 List.of(new ServiceStatus("i-pay", false, "Non autorisé")))
-    //         );
-    //     }
-
-    //     // 4. Extraction des claims
-    //     String userId = jwtUtil.extractUserId(jwt);
-    //     String ipayToken = jwtUtil.extractIpayToken(jwt);
-    //     String telephone = jwtUtil.extractTelephone(jwt);
-        
-    //     // if (userId == null || ipayToken == null) {
-    //     //     logger.warn("Token ne contient pas les claims requis - userId: {}, ipayToken: {}", userId, ipayToken);
-    //     //     return buildUnauthorizedResponse(
-    //     //         new NotificationResponse("error", "Token incomplet", null,
-    //     //             List.of(new ServiceStatus("i-pay", false, "Non autorisé")))
-    //     //     );
-    //     // }
-    //     if (ipayToken == null) {
-    //         logger.warn("Token ne contient pas le token IPay: {}", ipayToken);
-    //         return buildUnauthorizedResponse(
-    //             new NotificationResponse("error", "Token incomplet", null,
-    //                 List.of(new ServiceStatus("i-pay", false, "Non autorisé")))
-    //         );
-    //     }
-    
-
-    //     logger.info("Demande des notifications pour l'utilisateur ID: {}", userId);
-        
-    //     // 5. Appel du service IPay
-    //     return ipayService.getAllNotif(ipayToken, userId)
-    //         .flatMap(xmlResponse -> {
-    //             try {
-    //                 Document doc = DocumentBuilderFactory.newInstance()
-    //                         .newDocumentBuilder()
-    //                         .parse(new InputSource(new StringReader(xmlResponse)));
-                    
-    //                 XPath xpath = XPathFactory.newInstance().newXPath();
-    //                 String error = xpath.evaluate("//return/error", doc);
-    //                 // String message = xpath.evaluate("//return/message", doc);
-
-    //                 if ("0".equals(error)) {
-    //                     // Utiliser XPathConstants.NODESET pour récupérer tous les nœuds notifications
-    //                     NodeList notificationNodes = (NodeList) xpath.evaluate(
-    //                         "//return/notifications", doc, XPathConstants.NODESET);
-                        
-    //                     List<Notification> notificationList = new ArrayList<>();
-                        
-    //                     // Parcourir chaque nœud de notification
-    //                     for (int i = 0; i < notificationNodes.getLength(); i++) {
-    //                         org.w3c.dom.Node node = notificationNodes.item(i);
-                            
-    //                         String id = xpath.evaluate("id", node);
-    //                         String date = xpath.evaluate("date", node);
-    //                         String libelle = xpath.evaluate("libelle", node); // Mappage libelle -> message
-    //                         String status = xpath.evaluate("lu", node);
-                            
-    //                         notificationList.add(new Notification(id, date, libelle, "notification", status));
-    //                     }
-                        
-    //                     logger.info("Récupération de {} notifications", notificationList.size());
-                        
-    //                     return Mono.just(ResponseEntity.ok(
-    //                         new NotificationResponse(
-    //                             "success",
-    //                             "",
-    //                             notificationList,
-    //                             List.of(new ServiceStatus("i-pay", true, "Notifications récupérées"))
-    //                         )
-    //                     ));
-    //                 } else {
-    //                     String message = xpath.evaluate("//return/message", doc);
-    //                     logger.warn("Erreur lors de la récupération des notifications: {} - {}", error, message);
-    //                     return Mono.just(ResponseEntity.badRequest().body(
-    //                         new NotificationResponse(
-    //                             "error",
-    //                             message,
-    //                             null,
-    //                             List.of(new ServiceStatus("i-pay", false, message))
-    //                         )
-    //                     ));
-    //                 }
-    //                 // if ("0".equals(error)) {
-    //                 //     List<Notification> notifications = new ArrayList<>();
-                        
-    //                 //     // Si le message n'indique pas "Aucune notification", tenter de récupérer les notifications
-    //                 //     if (!"Aucune notification".equals(message)) {
-    //                 //         try {
-    //                 //             NodeList notifNodes = (NodeList) xpath.evaluate("//return/notifications/item", doc, XPathConstants.NODESET);
-    //                 //             for (int i = 0; i < notifNodes.getLength(); i++) {
-    //                 //                 String id = xpath.evaluate("id", notifNodes.item(i));
-    //                 //                 String date = xpath.evaluate("date", notifNodes.item(i));
-    //                 //                 String notifMessage = xpath.evaluate("message", notifNodes.item(i));
-    //                 //                 String type = xpath.evaluate("type", notifNodes.item(i));
-    //                 //                 String status = xpath.evaluate("status", notifNodes.item(i));
-                                    
-    //                 //                 notifications.add(new Notification(id, date, notifMessage, type, status));
-    //                 //             }
-    //                 //         } catch (Exception e) {
-    //                 //             logger.warn("Erreur lors du parsing des notifications: {}", e.getMessage());
-    //                 //         }
-    //                 //     }
-                        
-    //                 //     return Mono.just(ResponseEntity.ok(
-    //                 //         new NotificationResponse(
-    //                 //             "success", 
-    //                 //             message, 
-    //                 //             notifications, 
-    //                 //             List.of(new ServiceStatus("i-pay", true, "Notifications récupérées"))
-    //                 //         )
-    //                 //     ));
-    //                 // } else {
-    //                 //     logger.warn("Erreur IPay lors de la récupération des notifications: {}", message);
-    //                 //     return Mono.just(ResponseEntity.badRequest().body(
-    //                 //         new NotificationResponse(
-    //                 //             "error",
-    //                 //             message,
-    //                 //             null,
-    //                 //             List.of(new ServiceStatus("i-pay", false, message))
-    //                 //         )
-    //                 //     ));
-    //                 // }
-    //             } catch (Exception e) {
-    //                 logger.error("Erreur de traitement de la réponse XML pour les notifications", e);
-    //                 return Mono.just(ResponseEntity.internalServerError().body(
-    //                     new NotificationResponse(
-    //                         "error",
-    //                         "Erreur technique",
-    //                         null,
-    //                         List.of(new ServiceStatus("i-pay", false, "Erreur de traitement"))
-    //                     )
-    //                 ));
-    //             }
-    //         })
-    //         .onErrorResume(e -> {
-    //             logger.error("Erreur lors de l'appel au service IPay pour les notifications", e);
-    //             return Mono.just(ResponseEntity.internalServerError().body(
-    //                 new NotificationResponse(
-    //                     "error",
-    //                     "Service indisponible",
-    //                     null,
-    //                     List.of(new ServiceStatus("i-pay", false, "Erreur de communication"))
-    //                 )
-    //             ));
-    //         });
-    // }
-
-    // @GetMapping("/notifications")
-    // public Mono<ResponseEntity<NotificationResponse>> getNotifications(@RequestHeader(value = "Authorization", required = false) String authHeader) {
-    //     // 1. Vérification de la présence du header Authorization
-    //     if (authHeader == null || authHeader.isBlank()) {
-    //         logger.warn("Tentative d'accès aux notifications sans header Authorization");
-    //         return buildUnauthorizedResponse(
-    //             new NotificationResponse("error", "Token d'authentification manquant", null,
-    //                 List.of(new ServiceStatus("i-pay", false, "Non autorisé")))
-    //         );
-    //     }
-
-    //     // 2. Vérification du format Bearer
-    //     if (!authHeader.startsWith("Bearer ")) {
-    //         logger.warn("Format de token invalide pour les notifications: {}", authHeader);
-    //         return buildUnauthorizedResponse(
-    //             new NotificationResponse("error", "Format de token invalide", null,
-    //                 List.of(new ServiceStatus("i-pay", false, "Non autorisé")))
-    //         );
-    //     }
-
-    //     String jwt = authHeader.substring(7);
-        
-    //     // 3. Validation du token JWT
-    //     if (!jwtUtil.validateToken(jwt)) {
-    //         logger.warn("Token JWT invalide ou expiré pour les notifications");
-    //         return buildUnauthorizedResponse(
-    //             new NotificationResponse("error", "Token invalide ou expiré", null,
-    //                 List.of(new ServiceStatus("i-pay", false, "Non autorisé")))
-    //         );
-    //     }
-
-    //     // 4. Extraction des claims
-    //     String userId = jwtUtil.extractUserId(jwt);
-    //     String ipayToken = jwtUtil.extractIpayToken(jwt);
-    //     String telephone = jwtUtil.extractTelephone(jwt);
-        
-    //     if (ipayToken == null) {
-    //         logger.warn("Token ne contient pas le token IPay: {}", ipayToken);
-    //         return buildUnauthorizedResponse(
-    //             new NotificationResponse("error", "Token incomplet", null,
-    //                 List.of(new ServiceStatus("i-pay", false, "Non autorisé")))
-    //         );
-    //     }
-
-    //     // Si userId est vide mais que le téléphone est présent, essayer de récupérer l'userId
-    //     if ((userId == null || userId.isBlank()) && telephone != null && !telephone.isBlank()) {
-    //         logger.info("UserId manquant, tentative de récupération via le téléphone: {}", telephone);
-    //         return ipayService.getUOByCellular(ipayToken, telephone)
-    //             .flatMap(xmlResponse -> {
-    //                 try {
-    //                     Document doc = DocumentBuilderFactory.newInstance()
-    //                             .newDocumentBuilder()
-    //                             .parse(new InputSource(new StringReader(xmlResponse)));
-                        
-    //                     XPath xpath = XPathFactory.newInstance().newXPath();
-    //                     String error = xpath.evaluate("//return/error", doc);
-                        
-    //                     if ("0".equals(error)) {
-    //                         // Extraire l'ID utilisateur
-    //                         String extractedUserId = xpath.evaluate("//return/iduser", doc);
-    //                         if (extractedUserId != null && !extractedUserId.isBlank()) {
-    //                             logger.info("UserId récupéré avec succès: {}", extractedUserId);
-    //                             // Continuer avec l'ID récupéré
-    //                             return getNotificationsWithUserId(ipayToken, extractedUserId);
-    //                         }
-    //                     }
-                        
-    //                     // Si on n'a pas pu récupérer l'ID, utiliser une valeur par défaut
-    //                     logger.warn("Impossible de récupérer l'ID utilisateur, utilisation de valeur par défaut");
-    //                     return getNotificationsWithUserId(ipayToken, "");
-                        
-    //                 } catch (Exception e) {
-    //                     logger.error("Erreur lors de la récupération de l'ID utilisateur", e);
-    //                     return getNotificationsWithUserId(ipayToken, "35705");
-    //                 }
-    //             })
-    //             .onErrorResume(e -> {
-    //                 logger.error("Erreur lors de l'appel getUOByCellular", e);
-    //                 return getNotificationsWithUserId(ipayToken, "");
-    //             });
-    //     } else {
-    //         // Si userId est déjà présent, continuer normalement
-    //         logger.info("Demande des notifications pour l'utilisateur ID: {}", userId);
-    //         return getNotificationsWithUserId(ipayToken, userId);
-    //     }
-    // }
-
-    // /**
-    //  * Méthode privée pour récupérer les notifications avec un ID utilisateur donné
-    //  */
-    // private Mono<ResponseEntity<NotificationResponse>> getNotificationsWithUserId(String ipayToken, String userId) {
-    //     return ipayService.getAllNotif(ipayToken, userId)
-    //         .flatMap(xmlResponse -> {
-    //             try {
-    //                 logger.debug("Réponse XML pour les notifications: {}", xmlResponse);
-                    
-    //                 Document doc = DocumentBuilderFactory.newInstance()
-    //                         .newDocumentBuilder()
-    //                         .parse(new InputSource(new StringReader(xmlResponse)));
-                    
-    //                 XPath xpath = XPathFactory.newInstance().newXPath();
-    //                 String error = xpath.evaluate("//return/error", doc);
-                    
-    //                 if ("0".equals(error)) {
-    //                     // Utiliser XPathConstants.NODESET pour récupérer tous les nœuds notifications
-    //                     NodeList notificationNodes = (NodeList) xpath.evaluate(
-    //                         "//return/notifications", doc, XPathConstants.NODESET);
-                        
-    //                     List<Notification> notificationList = new ArrayList<>();
-                        
-    //                     // Parcourir chaque nœud de notification
-    //                     for (int i = 0; i < notificationNodes.getLength(); i++) {
-    //                         org.w3c.dom.Node node = notificationNodes.item(i);
-                            
-    //                         String id = xpath.evaluate("id", node);
-    //                         String date = xpath.evaluate("date", node);
-    //                         String message = xpath.evaluate("libelle", node); // Mappage libelle -> message
-    //                         String status = xpath.evaluate("lu", node);
-                            
-    //                         notificationList.add(new Notification(id, date, message, "notification", status));
-    //                     }
-                        
-    //                     logger.info("Récupération de {} notifications", notificationList.size());
-                        
-    //                     return Mono.just(ResponseEntity.ok(
-    //                         new NotificationResponse(
-    //                             "success",
-    //                             "",
-    //                             notificationList,
-    //                             List.of(new ServiceStatus("i-pay", true, "Notifications récupérées"))
-    //                         )
-    //                     ));
-    //                 } else {
-    //                     String message = xpath.evaluate("//return/message", doc);
-    //                     logger.warn("Erreur lors de la récupération des notifications: {} - {}", error, message);
-    //                     return Mono.just(ResponseEntity.badRequest().body(
-    //                         new NotificationResponse(
-    //                             "error",
-    //                             message,
-    //                             null,
-    //                             List.of(new ServiceStatus("i-pay", false, message))
-    //                         )
-    //                     ));
-    //                 }
-    //             } catch (Exception e) {
-    //                 logger.error("Erreur de traitement de la réponse XML pour les notifications", e);
-    //                 return Mono.just(ResponseEntity.internalServerError().body(
-    //                     new NotificationResponse(
-    //                         "error",
-    //                         "Erreur technique",
-    //                         null,
-    //                         List.of(new ServiceStatus("i-pay", false, "Erreur de traitement"))
-    //                     )
-    //                 ));
-    //             }
-    //         })
-    //         .onErrorResume(e -> {
-    //             logger.error("Erreur lors de l'appel au service IPay pour les notifications", e);
-    //             return Mono.just(ResponseEntity.internalServerError().body(
-    //                 new NotificationResponse(
-    //                     "error",
-    //                     "Service indisponible",
-    //                     null,
-    //                     List.of(new ServiceStatus("i-pay", false, "Erreur de communication"))
-    //                 )
-    //             ));
-    //         });
-    // }
-
-
-
-        /**
-     * Endpoint pour effectuer un virement compte à compte
-     * @param authHeader Le header d'autorisation contenant le JWT
-     * @param request La requête contenant les détails du virement
-     * @return Une réponse indiquant le succès ou l'échec du virement
-     */
     @PostMapping("/transfer")
     public Mono<ResponseEntity<TransferResponse>> transferFunds(
             @RequestHeader(value = "Authorization", required = false) String authHeader,
             @RequestBody TransferRequest request) {
         
-        // 1. Vérification de la présence du header Authorization
-        if (authHeader == null || authHeader.isBlank()) {
-            logger.warn("Tentative de virement sans header Authorization");
-            return buildUnauthorizedResponse(
-                new TransferResponse("error", "Token d'authentification manquant", null,
+        Map<String, String> authInfo = extractAuthInfo(authHeader);
+        if (authInfo == null) {
+            return Mono.just(ResponseEntity.status(HttpStatus.UNAUTHORIZED).body(
+                new TransferResponse("error", "Authentification requise", null,
                     List.of(new ServiceStatus("i-pay", false, "Non autorisé")))
-            );
-        }
-
-        // 2. Vérification du format Bearer
-        if (!authHeader.startsWith("Bearer ")) {
-            logger.warn("Format de token invalide pour le virement: {}", authHeader);
-            return buildUnauthorizedResponse(
-                new TransferResponse("error", "Format de token invalide", null,
-                    List.of(new ServiceStatus("i-pay", false, "Non autorisé")))
-            );
-        }
-
-        String jwt = authHeader.substring(7);
-        
-        // 3. Validation du token JWT
-        if (!jwtUtil.validateToken(jwt)) {
-            logger.warn("Token JWT invalide ou expiré pour le virement");
-            return buildUnauthorizedResponse(
-                new TransferResponse("error", "Token invalide ou expiré", null,
-                    List.of(new ServiceStatus("i-pay", false, "Non autorisé")))
-            );
-        }
-
-        // 4. Extraction des claims nécessaires
-        String userId = jwtUtil.extractUserId(jwt);
-        String ipayToken = jwtUtil.extractIpayToken(jwt);
-        
-        if (userId == null || ipayToken == null) {
-            logger.warn("Token ne contient pas les claims requis - userId: {}, ipayToken: {}", userId, ipayToken);
-            return buildUnauthorizedResponse(
-                new TransferResponse("error", "Token incomplet", null,
-                    List.of(new ServiceStatus("i-pay", false, "Non autorisé")))
-            );
-        }
-
-        // 5. Validation des données de la requête
-        String montant = request.getMontant();
-        String idAccountBeneficiary = request.getIdAccountBeneficiary();
-        
-        if (montant == null || montant.isBlank() || idAccountBeneficiary == null || idAccountBeneficiary.isBlank()) {
-            logger.warn("Données de virement incomplètes - montant: {}, idAccountBeneficiary: {}", montant, idAccountBeneficiary);
-            return Mono.just(ResponseEntity.badRequest().body(
-                new TransferResponse("error", "Données de virement incomplètes", null,
-                    List.of(new ServiceStatus("i-pay", false, "Données invalides")))
             ));
         }
         
-        try {
-            // Vérification que le montant est un nombre positif
-            double amount = Double.parseDouble(montant);
-            if (amount <= 0) {
-                return Mono.just(ResponseEntity.badRequest().body(
-                    new TransferResponse("error", "Montant invalide", null,
-                        List.of(new ServiceStatus("i-pay", false, "Montant doit être positif")))
-                ));
-            }
-        } catch (NumberFormatException e) {
+        String ipayToken = authInfo.get("ipayToken");
+        String accountIdIPay = authInfo.get("accountIdIPay");
+       
+    
+        
+        if (accountIdIPay == null) {
+            logger.warn("ID de compte non disponible pour le transfert");
             return Mono.just(ResponseEntity.badRequest().body(
-                new TransferResponse("error", "Format de montant invalide", null,
-                    List.of(new ServiceStatus("i-pay", false, "Montant doit être un nombre")))
+                new TransferResponse("error", "Information de compte manquante", null,
+                    List.of(new ServiceStatus("i-pay", false, "Informations incomplètes")))
             ));
         }
-
-        // 6. Initialisation des valeurs par défaut pour les champs optionnels
-        String commission = request.getCommission() != null ? request.getCommission() : "0";
-        String objet = request.getObjet() != null ? request.getObjet() : "";
-        String commissionRetrait = request.getCommissionRetrait() != null ? request.getCommissionRetrait() : "0";
         
-        logger.info("Demande de virement du compte {} vers le compte {}, montant: {}", 
-            userId, idAccountBeneficiary, montant);
+        logger.info("Transfert de {} vers le compte {} (compte source: {})",
+                request.getMontant(), request.getIdAccountBeneficiary(), accountIdIPay);
         
-        // 7. Appel du service IPay
-        return ipayService.w2wVirementAccount(ipayToken, montant, commission, userId, 
-                idAccountBeneficiary, objet, commissionRetrait)
+        return ipayService.w2wVirementAccount(
+                ipayToken, 
+                request.getMontant(),
+                request.getCommission() != null ? request.getCommission() : "0",
+                accountIdIPay,  // ID du compte émetteur récupéré du JWT 
+                request.getIdAccountBeneficiary(), 
+                request.getObjet() != null ? request.getObjet() : "",
+                request.getCommissionRetrait() != null ? request.getCommissionRetrait() : "0"
+            )
             .flatMap(xmlResponse -> {
                 try {
                     Document doc = DocumentBuilderFactory.newInstance()
@@ -1232,63 +731,35 @@ public class IPayController {
                     String error = xpath.evaluate("//return/error", doc);
                     String message = xpath.evaluate("//return/message", doc);
                     String reference = xpath.evaluate("//return/reference", doc);
-
+                    
                     if ("0".equals(error)) {
-                        logger.info("Virement réussi, référence: {}", reference);
                         return Mono.just(ResponseEntity.ok(
-                            new TransferResponse(
-                                "success", 
-                                message, 
-                                reference, 
-                                List.of(new ServiceStatus("i-pay", true, "Virement effectué"))
-                            )
+                            new TransferResponse("success", message, reference,
+                                List.of(new ServiceStatus("i-pay", true, message)))
                         ));
                     } else {
-                        logger.warn("Échec du virement: {} - {}", error, message);
-                        return Mono.just(ResponseEntity.badRequest().body(
-                            new TransferResponse(
-                                "error",
-                                message,
-                                null,
-                                List.of(new ServiceStatus("i-pay", false, message))
-                            )
+                        return Mono.just(ResponseEntity.status(HttpStatus.BAD_REQUEST).body(
+                            new TransferResponse("error", message, null,
+                                List.of(new ServiceStatus("i-pay", false, message)))
                         ));
                     }
                 } catch (Exception e) {
-                    logger.error("Erreur de traitement de la réponse XML pour le virement", e);
-                    return Mono.just(ResponseEntity.internalServerError().body(
-                        new TransferResponse(
-                            "error",
-                            "Erreur technique",
-                            null,
-                            List.of(new ServiceStatus("i-pay", false, "Erreur de traitement"))
-                        )
+                    logger.error("Erreur lors du traitement de la réponse de transfert", e);
+                    return Mono.just(ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(
+                        new TransferResponse("error", "Erreur technique: " + e.getMessage(), null,
+                            List.of(new ServiceStatus("i-pay", false, "Erreur de traitement")))
                     ));
                 }
             })
             .onErrorResume(e -> {
-                logger.error("Erreur lors de l'appel au service IPay pour le virement", e);
-                return Mono.just(ResponseEntity.internalServerError().body(
-                    new TransferResponse(
-                        "error",
-                        "Service indisponible",
-                        null,
-                        List.of(new ServiceStatus("i-pay", false, "Erreur de communication"))
-                    )
+                logger.error("Erreur lors du transfert", e);
+                return Mono.just(ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(
+                    new TransferResponse("error", "Erreur technique: " + e.getMessage(), null,
+                        List.of(new ServiceStatus("i-pay", false, "Service indisponible")))
                 ));
             });
     }
 
-        /**
-     * Endpoint pour envoyer un code de paiement par SMS
-     * @param authH    {
-      "beneficiaireTel": "783198156",
-      "montant": "0",
-      "numeros": "?"
-    }eader Le header d'autorisation contenant le JWT
-     * @param request La requête contenant les détails du paiement par SMS
-     * @return Une réponse indiquant le succès ou l'échec de l'envoi du code de paiement
-     */
     @PostMapping("/sms-pay")
     public Mono<ResponseEntity<SmsPayResponse>> sendSmsPayCode(
             @RequestHeader(value = "Authorization", required = false) String authHeader,
@@ -1588,8 +1059,7 @@ public class IPayController {
             });
     }
 
-
-        /**
+    /**
      * Endpoint pour effectuer un paiement de facture Senelec
      * @param authHeader Le header d'autorisation contenant le JWT
      * @param request La requête contenant les détails du paiement Senelec
@@ -1743,7 +1213,7 @@ public class IPayController {
             });
     }
 
-        /**
+    /**
      * Endpoint pour effectuer un paiement Woyofal
      * @param authHeader Le header d'autorisation contenant le JWT
      * @param request La requête contenant les détails du paiement Woyofal
@@ -1907,8 +1377,7 @@ public class IPayController {
             });
     }
 
-
-        /**
+    /**
      * Endpoint pour effectuer un paiement iShop
      * @param authHeader Le header d'autorisation contenant le JWT (optionnel)
      * @param request La requête contenant les détails du paiement iShop
@@ -2015,6 +1484,38 @@ public class IPayController {
                     )
                 ));
             });
+    }
+
+    /**
+     * Extrait les informations d'authentification du JWT
+     * @param authHeader Le header d'autorisation contenant le JWT
+     * @return Un objet contenant les informations d'authentification ou null en cas d'erreur
+     */
+    private Map<String, String> extractAuthInfo(String authHeader) {
+        if (authHeader == null || authHeader.isBlank()) {
+            logger.warn("Header d'autorisation manquant");
+            return null;
+        }
+
+        if (!authHeader.startsWith("Bearer ")) {
+            logger.warn("Format de token invalide: {}", authHeader);
+            return null;
+        }
+
+        String jwt = authHeader.substring(7);
+        
+        if (!jwtUtil.validateToken(jwt)) {
+            logger.warn("Token JWT invalide ou expiré");
+            return null;
+        }
+
+        Map<String, String> authInfo = new HashMap<>();
+        authInfo.put("ipayToken", jwtUtil.extractIpayToken(jwt));
+        authInfo.put("telephone", jwtUtil.extractTelephone(jwt));
+        authInfo.put("userId", jwtUtil.extractUserId(jwt));
+        authInfo.put("accountIdIPay", jwtUtil.extractAccountIdIPay(jwt));
+        
+        return authInfo;
     }
 
     private Mono<ResponseEntity<SoldeResponse>> handleSoapResponse(String xmlResponse) {
