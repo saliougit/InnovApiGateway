@@ -1,41 +1,3 @@
-# server:
-#   port: 8080
-
-# spring:
-#   main:
-#     allow-bean-definition-overriding: true
-#     web-application-type: reactive
-#   application:
-#     name: api-gateway
-#   cloud:
-#     gateway:
-#       routes:
-#         - id: ipay-service
-#           uri: http://localhost:8081
-#           predicates:
-#             - Path=/ipay/**
-#         - id: ibanking-service
-#           uri: http://localhost:8082
-#           predicates:
-#             - Path=/ibanking/**
-
-#   data:
-#     redis:
-#       host: localhost
-#       port: 6379
-
-# jwt:
-#   secret: yourSecretKeyHereMustBeVeryLongAndSecure
-#   expiration: 86400000  # 24 hours in milliseconds
-
-# logging:
-#   level:
-#     org.springframework.cloud.gateway: DEBUG
-#     org.springframework.security: DEBUG
-
-
-# ------------
-
 server:
   port: 8080
 
@@ -71,51 +33,22 @@ logging:
     org.springframework.cloud.gateway: DEBUG
     org.springframework.security: DEBUG
 
+# Configuration pour SpringDoc OpenAPI
+springdoc:
+  swagger-ui:
+    path: /swagger-ui.html
+    use-root-path: true
+    enabled: true
+    config-url: /v3/api-docs/swagger-config
+    urls:
+      - url: /v3/api-docs
+        name: API Gateway
+  api-docs:
+    path: /v3/api-docs
+    enabled: true
+  show-actuator: true
+  packages-to-scan: com.innov4africa.api_gateway.controller
 
-
-
-
-
-# ---------------
-
-
-# server:
-#   port: 8080
-
-# spring:
-#   application:
-#     name: api-gateway
-#   cloud:
-#     gateway:
-#       routes:
-#         - id: ipay-service
-#           uri: http://localhost:8081
-#           predicates:
-#             - Path=/ipay/**
-#         - id: ibanking-service
-#           uri: http://localhost:8082
-#           predicates:
-#             - Path=/ibanking/**
-
-#   data:
-#     redis:
-#       host: localhost
-#       port: 6379
-
-# jwt:
-#   secret: yourSecretKeyHereMustBeVeryLongAndSecure
-#   expiration: 86400000  # 24 hours in milliseconds
-
-# logging:
-#   level:
-#     org.springframework.cloud.gateway: DEBUG
-#     org.springframework.security: DEBUG
-
-# # Configuration pour SpringDoc OpenAPI
-# springdoc:
-#   swagger-ui:
-#     path: /swagger-ui.html
-#     enabled: true
-#   api-docs:
-#     path: /v3/api-docs
-#     enabled: true
+# Configuration URLs for OpenAPI
+openapi:
+  dev-url: http://localhost:8080

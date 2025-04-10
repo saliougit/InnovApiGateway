@@ -12,11 +12,22 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 import reactor.core.publisher.Mono;
 
+import io.swagger.v3.oas.annotations.Operation;
+import io.swagger.v3.oas.annotations.Parameter;
+import io.swagger.v3.oas.annotations.media.Content;
+import io.swagger.v3.oas.annotations.media.Schema;
+import io.swagger.v3.oas.annotations.responses.ApiResponse;
+import io.swagger.v3.oas.annotations.responses.ApiResponses;
+import io.swagger.v3.oas.annotations.tags.Tag;
+import io.swagger.v3.oas.annotations.security.SecurityRequirement;
+
 import java.util.List;
 import java.util.Map;
 
 @RestController
 @RequestMapping("/wave")
+@Tag(name = "Wave", description = "API de transfert d'argent Wave")
+@SecurityRequirement(name = "bearer-jwt")
 public class WaveController {
 
     private static final Logger logger = LoggerFactory.getLogger(WaveController.class);
@@ -34,10 +45,24 @@ public class WaveController {
      * @param request Requête de prélèvement avec informations nécessaires
      * @return Réponse avec URL du QR code à scanner
      */
+    @Operation(
+        summary = "Effectuer un prélèvement Wave", 
+        description = "Permet d'initier un prélèvement Wave en générant un QR code que l'utilisateur doit scanner avec l'application Wave"
+    )
+    @ApiResponses(value = {
+        @ApiResponse(responseCode = "200", description = "Prélèvement initié avec succès", 
+            content = @Content(schema = @Schema(implementation = WaveOperationResponse.class))),
+        @ApiResponse(responseCode = "400", description = "Requête invalide ou erreur de l'API Wave"),
+        @ApiResponse(responseCode = "401", description = "Non autorisé - JWT invalide"),
+        @ApiResponse(responseCode = "500", description = "Erreur interne du serveur")
+    })
     @PostMapping("/prelevement")
     public Mono<ResponseEntity<WaveOperationResponse>> prelevement(
-            @RequestHeader(value = "Authorization", required = false) String authHeader,
-            @RequestBody WaveOperationRequest request) {
+            @RequestHeader(value = "Authorization", required = false) 
+            @Parameter(description = "JWT Bearer token (format: Bearer token)") String authHeader,
+            @RequestBody 
+            @Parameter(description = "Informations nécessaires pour le prélèvement Wave", 
+                      required = true) WaveOperationRequest request) {
         
         // Vérification du header d'autorisation
         if (authHeader == null || authHeader.isBlank()) {
@@ -106,10 +131,24 @@ public class WaveController {
      * @param request Requête de virement avec informations nécessaires
      * @return Réponse avec URL du QR code à scanner
      */
+    @Operation(
+        summary = "Effectuer un virement Wave", 
+        description = "Permet d'initier un virement Wave en générant un QR code que l'utilisateur doit scanner avec l'application Wave"
+    )
+    @ApiResponses(value = {
+        @ApiResponse(responseCode = "200", description = "Virement initié avec succès", 
+            content = @Content(schema = @Schema(implementation = WaveOperationResponse.class))),
+        @ApiResponse(responseCode = "400", description = "Requête invalide ou erreur de l'API Wave"),
+        @ApiResponse(responseCode = "401", description = "Non autorisé - JWT invalide"),
+        @ApiResponse(responseCode = "500", description = "Erreur interne du serveur")
+    })
     @PostMapping("/virement")
     public Mono<ResponseEntity<WaveOperationResponse>> virement(
-            @RequestHeader(value = "Authorization", required = false) String authHeader,
-            @RequestBody WaveOperationRequest request) {
+            @RequestHeader(value = "Authorization", required = false) 
+            @Parameter(description = "JWT Bearer token (format: Bearer token)") String authHeader,
+            @RequestBody 
+            @Parameter(description = "Informations nécessaires pour le virement Wave", 
+                      required = true) WaveOperationRequest request) {
         
         // Vérification du header d'autorisation
         if (authHeader == null || authHeader.isBlank()) {
@@ -172,93 +211,6 @@ public class WaveController {
     }
 
     /**
-     * Méthode commune pour gérer les réponses des opérations Wave (prélèvement/virement)
-     * 
-     * @param response Réponse de l'API Wave
-     * @param operationType Type d'opération (prélèvement/virement)
-     * @return ResponseEntity formaté pour le client
-     */
-    private Mono<ResponseEntity<WaveOperationResponse>> handleWaveResponse(Map<String, Object> response, String operationType) {
-        // Extraction des informations de la réponse
-        String status = response.containsKey("status") ? (String) response.get("status") : null;
-        String message = response.containsKey("message") ? (String) response.get("message") : null;
-        String code = response.containsKey("code") ? String.valueOf(response.get("code")) : null;
-        String statut = response.containsKey("statut") ? (String) response.get("statut") : null;
-        
-        // Log de debug pour voir la structure complète de la réponse
-        logger.debug("Réponse Wave reçue: {}", response);
-        
-        // Vérification si c'est un succès (code 200 et/ou status=success)
-        boolean isSuccess = ("200".equals(code) || "success".equalsIgnoreCase(status)) && 
-                           !("SOLDE_INSUFFISANT".equals(statut) || "COMPTE_INEXISTANT".equals(statut));
-        
-        // Construction du message approprié selon le code d'erreur
-        String userMessage;
-        if (message != null && !message.isEmpty()) {
-            userMessage = message;
-        } else if ("SOLDE_INSUFFISANT".equals(statut)) {
-            userMessage = "Solde insuffisant pour effectuer cette opération";
-        } else if ("COMPTE_INEXISTANT".equals(statut)) {
-            userMessage = "Le numéro Wave spécifié n'existe pas";
-        } else if (isSuccess) {
-            userMessage = operationType.equals("virement") ? 
-                    "Virement Wave initié avec succès" : 
-                    "Prélèvement Wave initié avec succès";
-        } else {
-            userMessage = "Erreur lors du " + operationType + " Wave";
-            if (code != null) {
-                userMessage += " (Code: " + code + ")";
-            }
-            if (statut != null) {
-                userMessage += " - " + statut;
-            }
-        }
-        
-        if (isSuccess) {
-            // Récupération du QR code image (encodé en base64)
-            String qrCodeImage = response.get("qrCode") != null ? (String) response.get("qrCode") : null;
-            
-            // Récupération de l'URL du QR code ou du service de paiement
-            String qrCodeUrl = response.get("qrCodeUrl") != null ? (String) response.get("qrCodeUrl") : null;
-            
-            // Récupération de l'URL Wave Pay (si disponible)
-            String wavePayUrl = (String) response.get("url");
-            
-            String requestId = response.get("requestId") != null ? response.get("requestId").toString() : null;
-            String transactionId = response.get("transactionId") != null ? 
-                                   response.get("transactionId").toString() : 
-                                   response.get("id_transaction") != null ? 
-                                   response.get("id_transaction").toString() : null;
-            
-            return Mono.just(ResponseEntity.ok(
-                new WaveOperationResponse(
-                    "success",
-                    userMessage,
-                    qrCodeUrl,
-                    wavePayUrl,
-                    qrCodeImage,
-                    transactionId,
-                    requestId,
-                    List.of(new ServiceStatus("wave", true, userMessage))
-                )
-            ));
-        } else {
-            return Mono.just(ResponseEntity.badRequest().body(
-                new WaveOperationResponse(
-                    "error",
-                    userMessage,
-                    null,
-                    null,
-                    null,
-                    null,
-                    null,
-                    List.of(new ServiceStatus("wave", false, userMessage))
-                )
-            ));
-        }
-    }
-
-    /**
      * Endpoint pour calculer les commissions d'une opération Wave
      * 
      * @param authHeader Header d'autorisation contenant le JWT
@@ -266,11 +218,24 @@ public class WaveController {
      * @param service Type de service (PRELEVEMENT ou VIREMENT)
      * @return Réponse contenant les informations de commission
      */
+    @Operation(
+        summary = "Calculer les frais de commission Wave", 
+        description = "Calcule les frais de commission pour une opération Wave selon le montant et le type d'opération"
+    )
+    @ApiResponses(value = {
+        @ApiResponse(responseCode = "200", description = "Commission calculée avec succès"),
+        @ApiResponse(responseCode = "400", description = "Paramètres invalides"),
+        @ApiResponse(responseCode = "401", description = "Non autorisé - JWT invalide"),
+        @ApiResponse(responseCode = "500", description = "Erreur interne du serveur")
+    })
     @GetMapping("/commission")
     public Mono<ResponseEntity<Map<String, Object>>> getCommission(
-            @RequestHeader(value = "Authorization", required = false) String authHeader,
-            @RequestParam String montant,
-            @RequestParam String service) {
+            @RequestHeader(value = "Authorization", required = false) 
+            @Parameter(description = "JWT Bearer token (format: Bearer token)") String authHeader,
+            @RequestParam 
+            @Parameter(description = "Montant de l'opération en FCFA", required = true) String montant,
+            @RequestParam 
+            @Parameter(description = "Type de service (PRELEVEMENT ou VIREMENT)", required = true) String service) {
         
         // Vérification du header d'autorisation
         if (authHeader == null || authHeader.isBlank()) {
@@ -369,5 +334,92 @@ public class WaveController {
                 List.of(new ServiceStatus("wave", false, message))
             )
         ));
+    }
+
+    /**
+     * Méthode commune pour gérer les réponses des opérations Wave (prélèvement/virement)
+     * 
+     * @param response Réponse de l'API Wave
+     * @param operationType Type d'opération (prélèvement/virement)
+     * @return ResponseEntity formaté pour le client
+     */
+    private Mono<ResponseEntity<WaveOperationResponse>> handleWaveResponse(Map<String, Object> response, String operationType) {
+        // Extraction des informations de la réponse
+        String status = response.containsKey("status") ? (String) response.get("status") : null;
+        String message = response.containsKey("message") ? (String) response.get("message") : null;
+        String code = response.containsKey("code") ? String.valueOf(response.get("code")) : null;
+        String statut = response.containsKey("statut") ? (String) response.get("statut") : null;
+        
+        // Log de debug pour voir la structure complète de la réponse
+        logger.debug("Réponse Wave reçue: {}", response);
+        
+        // Vérification si c'est un succès (code 200 et/ou status=success)
+        boolean isSuccess = ("200".equals(code) || "success".equalsIgnoreCase(status)) && 
+                           !("SOLDE_INSUFFISANT".equals(statut) || "COMPTE_INEXISTANT".equals(statut));
+        
+        // Construction du message approprié selon le code d'erreur
+        String userMessage;
+        if (message != null && !message.isEmpty()) {
+            userMessage = message;
+        } else if ("SOLDE_INSUFFISANT".equals(statut)) {
+            userMessage = "Solde insuffisant pour effectuer cette opération";
+        } else if ("COMPTE_INEXISTANT".equals(statut)) {
+            userMessage = "Le numéro Wave spécifié n'existe pas";
+        } else if (isSuccess) {
+            userMessage = operationType.equals("virement") ? 
+                    "Virement Wave initié avec succès" : 
+                    "Prélèvement Wave initié avec succès";
+        } else {
+            userMessage = "Erreur lors du " + operationType + " Wave";
+            if (code != null) {
+                userMessage += " (Code: " + code + ")";
+            }
+            if (statut != null) {
+                userMessage += " - " + statut;
+            }
+        }
+        
+        if (isSuccess) {
+            // Récupération du QR code image (encodé en base64)
+            String qrCodeImage = response.get("qrCode") != null ? (String) response.get("qrCode") : null;
+            
+            // Récupération de l'URL du QR code ou du service de paiement
+            String qrCodeUrl = response.get("qrCodeUrl") != null ? (String) response.get("qrCodeUrl") : null;
+            
+            // Récupération de l'URL Wave Pay (si disponible)
+            String wavePayUrl = (String) response.get("url");
+            
+            String requestId = response.get("requestId") != null ? response.get("requestId").toString() : null;
+            String transactionId = response.get("transactionId") != null ? 
+                                   response.get("transactionId").toString() : 
+                                   response.get("id_transaction") != null ? 
+                                   response.get("id_transaction").toString() : null;
+            
+            return Mono.just(ResponseEntity.ok(
+                new WaveOperationResponse(
+                    "success",
+                    userMessage,
+                    qrCodeUrl,
+                    wavePayUrl,
+                    qrCodeImage,
+                    transactionId,
+                    requestId,
+                    List.of(new ServiceStatus("wave", true, userMessage))
+                )
+            ));
+        } else {
+            return Mono.just(ResponseEntity.badRequest().body(
+                new WaveOperationResponse(
+                    "error",
+                    userMessage,
+                    null,
+                    null,
+                    null,
+                    null,
+                    null,
+                    List.of(new ServiceStatus("wave", false, userMessage))
+                )
+            ));
+        }
     }
 }
